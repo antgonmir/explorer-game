@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const GAME_WIDTH = 1000;
     const GAME_HEIGHT = 600;
     const GRAVITY = 0.6;
+    const LEVEL_WIDTH = GAME_WIDTH * 2.5; // Define a total width for the level
     const PLAYER_SPEED = 5;
     const JUMP_FORCE = -14;
     const DOUBLE_JUMP_FORCE = -12;
@@ -52,7 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (mainSvg) mainSvg.remove();
         mainSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        mainSvg.setAttribute('width', GAME_WIDTH);
+        mainSvg.setAttribute('width', LEVEL_WIDTH);
         mainSvg.setAttribute('height', GAME_HEIGHT);
         gameContainer.appendChild(mainSvg);
 
@@ -91,7 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let currentX = 0;
         let currentY = GAME_HEIGHT - 50;
 
-        while (currentX < GAME_WIDTH * 2) { // Generate a level wider than the screen
+        while (currentX < LEVEL_WIDTH - 400) { // Generate platforms until near the end of the level
             const width = 150 + Math.random() * 200;
             const height = 40 + Math.random() * 80;
             
@@ -134,7 +135,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         // Add water/precipice at the bottom
-        water = { x: 0, y: GAME_HEIGHT - 20, width: GAME_WIDTH * 2, height: 20 };
+        water = { x: 0, y: GAME_HEIGHT - 20, width: LEVEL_WIDTH, height: 20 };
 
         renderLevel();
     }
@@ -394,8 +395,8 @@ document.addEventListener('DOMContentLoaded', () => {
             p.x < door.x + door.width && p.x + p.width > door.x &&
             p.y < door.y + door.height && p.y + p.height > door.y) {
             
-            showEndScreen("You Escaped! Click to play again.");
-            cancelAnimationFrame(gameLoopId);
+            // showEndScreen stops the loop and sets up the next level on click
+            showEndScreen("Level Complete! Click to continue.");
         }
     }
 
