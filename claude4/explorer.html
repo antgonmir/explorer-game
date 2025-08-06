@@ -216,16 +216,19 @@
                     this.enemies.push(enemy);
                 }
                 
-                // Key placement (not in starting area)
-                let keyPlatforms = this.platforms.filter(p => p.x > 300);
-                let keyPlatform = keyPlatforms[Math.floor(Math.random() * keyPlatforms.length)];
-                this.key = {
-                    x: keyPlatform.x + keyPlatform.width / 2,
-                    y: keyPlatform.y - 25,
-                    width: 15,
-                    height: 20,
-                    collected: false
-                };
+                // Key placement (ensure it's reachable)
+                this.key = this.findReachableKeyPosition();
+                if (!this.key) {
+                    // Fallback: place key on a safe platform if pathfinding fails
+                    let safePlatform = this.platforms.find(p => p.x > 300 && p.width >= 80);
+                    this.key = {
+                        x: safePlatform.x + safePlatform.width / 2,
+                        y: safePlatform.y - 25,
+                        width: 15,
+                        height: 20,
+                        collected: false
+                    };
+                }
                 
                 // Door placement (far right)
                 let doorPlatform = this.platforms.find(p => p.x > this.levelWidth - 300);
@@ -592,6 +595,100 @@
                 level.textContent = `Level: ${this.level}`;
             }
             
+            // Check if a position is reachable from the starting position
+            isReachable(targetX, targetY, startX = 50, startY = this.height - 40 - this.player.height) {
+                const visited = new Set();
+                const queue = [{x: Math.floor(startX / 20), y: Math.floor(startY / 20)}];
+                const targetGridX = Math.floor(targetX / 20);
+                const targetGridY = Math.floor(targetY / 20);
+                const gridWidth = Math.ceil(this.levelWidth / 20);
+                const gridHeight = Math.ceil(this.height / 20);
+                
+                // Create a simplified grid representation
+                const grid = Array(gridHeight).fill().map(() => Array(gridWidth).fill(false));
+                
+                // Mark platform areas as walkable
+                for (let platform of this.platforms) {
+                    const startGridX = Math.floor(platform.x / 20);
+                    const endGridX = Math.floor((platform.x + platform.width) / 20);
+                    const gridY = Math.floor(platform.y / 20);
+                    
+                    for (let x = startGridX; x <= endGridX && x < gridWidth; x++) {
+                        if (gridY >= 0 && gridY < gridHeight) {
+                            grid[gridY][x] = true;
+                            // Also mark the space above the platform as reachable
+                            if (gridY - 1 >= 0) grid[gridY - 1][x] = true;
+                            if (gridY - 2 >= 0) grid[gridY - 2][x] = true;
+                        }
+                    }
+                }
+                
+                // BFS to find if target is reachable
+                while (queue.length > 0) {
+                    const current = queue.shift();
+                    const key = `${current.x},${current.y}`;
+                    
+                    if (visited.has(key)) continue;
+                    visited.add(key);
+                    
+                    // Check if we reached the target (within reasonable range)
+                    if (Math.abs(current.x - targetGridX) <= 2 && Math.abs(current.y - targetGridY) <= 2) {
+                        return true;
+                    }
+                    
+                    // Explore neighbors (including jump distances)
+                    const directions = [
+                        {x: 1, y: 0},   // right
+                        {x: -1, y: 0},  // left
+                        {x: 0, y: -1},  // up (jump)
+                        {x: 0, y: 1},   // down
+                        {x: 2, y: -1},  // jump right
+                        {x: -2, y: -1}, // jump left
+                        {x: 3, y: -2},  // long jump right
+                        {x: -3, y: -2}, // long jump left
+                    ];
+                    
+                    for (let dir of directions) {
+                        const newX = current.x + dir.x;
+                        const newY = current.y + dir.y;
+                        
+                        if (newX >= 0 && newX < gridWidth && newY >= 0 && newY < gridHeight) {
+                            if (grid[newY][newX] && !visited.has(`${newX},${newY}`)) {
+                                queue.push({x: newX, y: newY});
+                            }
+                        }
+                    }
+                }
+                
+                return false;
+            }
+            
+            findReachableKeyPosition() {
+                // Try to find a reachable position for the key
+                const candidatePlatforms = this.platforms.filter(p => p.x > 300);
+                const maxAttempts = 50;
+                
+                for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                    const platform = candidatePlatforms[Math.floor(Math.random() * candidatePlatforms.length)];
+                    const keyX = platform.x + platform.width / 2;
+                    const keyY = platform.y - 25;
+                    
+                    // Check if this position is reachable
+                    if (this.isReachable(keyX, keyY)) {
+                        return {
+                            x: keyX,
+                            y: keyY,
+                            width: 15,
+                            height: 20,
+                            collected: false
+                        };
+                    }
+                }
+                
+                // If no reachable position found, return null (will trigger fallback)
+                return null;
+            }
+
             gameLoop() {
                 this.update();
                 this.render();
