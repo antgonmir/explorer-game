@@ -33,13 +33,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const div = document.createElement('div');
         div.innerHTML = svgString;
         const svg = div.querySelector('svg');
-        svg.style.position = 'absolute';
         return svg;
     };
 
     const setElementPos = (el, x, y) => {
-        el.style.left = `${x}px`;
-        el.style.top = `${y}px`;
+        el.setAttribute('x', x);
+        el.setAttribute('y', y);
     };
 
     // --- GAME INITIALIZATION ---
@@ -313,7 +312,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- RENDER FUNCTION ---
     function render() {
-        setElementPos(player, playerState.x, playerState.y);
+        // The player is a special case because it's a root <svg> element.
+        // All other dynamic elements will be updated in their own update functions.
+        if (player) {
+            setElementPos(player, playerState.x, playerState.y);
+        }
     }
 
     // --- COLLISION DETECTION ---
