@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Procedural Platformer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #87CEEB, #98FB98);
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        
+        .game-container {
+            border: 3px solid #654321;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0,0,0,0.3);
+            background: #87CEEB;
+        }
+        
+        .ui {
+            background: #2F4F4F;
+            color: white;
+            padding: 10px;
+            text-align: center;
+            font-size: 18px;
+        }
+        
+        .controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            text-align: right;
+        }
+        
+        svg {
+            display: block;
+            background: linear-gradient(to bottom, #87CEEB 0%, #98FB98 100%);
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        Controls:<br>
+        A/D or ←/→ - Move<br>
+        W or ↑ or Space - Jump<br>
+        Double tap for double jump
+    </div>
+    
+    <div class="game-container">
+        <div class="ui">
+            <span id="status">Find the key, then reach the door!</span>
+            <span id="level">Level: 1</span>
+        </div>
+        <svg width="800" height="600" id="gameCanvas">
+            <defs>
+                <!-- Gradient definitions -->
+                <linearGradient id="grassGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" style="stop-color:#90EE90"/>
+                    <stop offset="100%" style="stop-color:#228B22"/>
+                </linearGradient>
+                <linearGradient id="stoneGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" style="stop-color:#D3D3D3"/>
+                    <stop offset="100%" style="stop-color:#696969"/>
+                </linearGradient>
+                <linearGradient id="waterGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" style="stop-color:#00BFFF"/>
+                    <stop offset="100%" style="stop-color:#0000FF"/>
+                </linearGradient>
+                <radialGradient id="keyGrad">
+                    <stop offset="0%" style="stop-color:#FFD700"/>
+                    <stop offset="100%" style="stop-color:#FFA500"/>
+                </radialGradient>
+            </defs>
+        </svg>
+    </div>
+
+    <script>
+        class Game {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.width = 800;
+                this.height = 600;
+                this.level = 1;
+                this.hasKey = false;
+                this.gameOver = false;
+                this.levelComplete = false;
+                
+                this.player = {
+                    x: 50,
+                    y: 400,
+                    width: 20,
+                    height: 30,
+                    vx: 0,
+                    vy: 0,
+                    onGround: false,
+                    jumpCount: 0,
+                    maxJumps: 2,
+                    speed: 3,
+                    jumpPower: 12,
+                    color: '#FF4500'
+                };
+                
+                this.camera = { x: 0, y: 0 };
+                this.platforms = [];
+                this.enemies = [];
+                this.decorations = [];
+                this.hazards = [];
+                this.key = null;
+                this.door = null;
+                this.levelWidth = 2000;
+                
+                this.keys = {};
+                this.setupControls();
+                this.generateLevel();
+                this.gameLoop();
+            }
+            
+            setupControls() {
+                document.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+                    this.keys[e.key] = true;
+                });
+                
+                document.addEventListener('keyup', (e) => {
+                    this.keys[e.code] = false;
+                    this.keys[e.key] = false;
+                });
+            }
+            
+            generateLevel() {
+                this.platforms = [];
+                this.enemies = [];
+                this.decorations = [];
+                this.hazards = [];
+                this.hasKey = false;
+                this.gameOver = false;
+                this.levelComplete = false;
+                
+                // Ground platforms
+                for (let x = 0; x < this.levelWidth; x += 100) {
+                    if (Math.random() < 0.8) {
+                        this.platforms.push({
+                            x: x,
+                            y: this.height - 40,
+                            width: 100,
+                            height: 40,
+                            type: 'ground'
+                        });
+                    } else {
+                        // Create hazards (water/pit)
+                        this.hazards.push({
+                            x: x,
+                            y: this.height - 40,
+                            width: 100,
+                            height: 40,
+                            type: 'water'
+                        });
+                    }
+                }
+                
+                // Floating platforms
+                for (let i = 0; i < 15 + this.level * 2; i++) {
+                    const platform = {
+                        x: Math.random() * (this.levelWidth - 150) + 100,
+                        y: Math.random() * (this.height - 200) + 100,
+                        width: 80 + Math.random() * 40,
+                        height: 20,
+                        type: Math.random() < 0.7 ? 'grass' : 'stone'
+                    };
+                    this.platforms.push(platform);
+                }
+                
+                // Enemies
+                for (let i = 0; i < 5 + this.level; i++) {
+                    const enemy = {
+                        x: Math.random() * (this.levelWidth - 200) + 200,
+                        y: this.height - 80,
+                        width: 20,
+                        height: 20,
+                        vx: (Math.random() - 0.5) * 2,
+                        type: Math.random() < 0.5 ? 'spider' : 'slime',
+                        patrolStart: 0,
+                        patrolEnd: 0
+                    };
+                    
+                    // Find platform for enemy
+                    for (let platform of this.platforms) {
+                        if (enemy.x > platform.x && enemy.x < platform.x + platform.width) {
+                            enemy.y = platform.y - enemy.height;
+                            enemy.patrolStart = platform.x;
+                            enemy.patrolEnd = platform.x + platform.width;
+                            break;
+                        }
+                    }
+                    this.enemies.push(enemy);
+                }
+                
+                // Key placement
+                let keyPlatform = this.platforms[Math.floor(Math.random() * this.platforms.length)];
+                this.key = {
+                    x: keyPlatform.x + keyPlatform.width / 2,
+                    y: keyPlatform.y - 25,
+                    width: 15,
+                    height: 20,
+                    collected: false
+                };
+                
+                // Door placement (far right)
+                let doorPlatform = this.platforms.find(p => p.x > this.levelWidth - 300);
+                if (!doorPlatform) doorPlatform = this.platforms[this.platforms.length - 1];
+                
+                this.door = {
+                    x: doorPlatform.x + doorPlatform.width / 2 - 15,
+                    y: doorPlatform.y - 40,
+                    width: 30,
+                    height: 40
+                };
+                
+                // Decorations
+                for (let i = 0; i < 20; i++) {
+                    const platform = this.platforms[Math.floor(Math.random() * this.platforms.length)];
+                    this.decorations.push({
+                        x: platform.x + Math.random() * platform.width,
+                        y: platform.y - 10,
+                        type: Math.random() < 0.6 ? 'grass_tuft' : 'rock',
+                        size: Math.random() * 5 + 3
+                    });
+                }
+                
+                // Reset player position
+                this.player.x = 50;
+                this.player.y = 400;
+                this.player.vx = 0;
+                this.player.vy = 0;
+                this.player.onGround = false;
+                this.player.jumpCount = 0;
+                
+                this.updateUI();
+            }
+            
+            update() {
+                if (this.gameOver || this.levelComplete) {
+                    if (this.keys['KeyR'] || this.keys['r']) {
+                        if (this.levelComplete) {
+                            this.level++;
+                            this.generateLevel();
+                        } else {
+                            this.generateLevel();
+                        }
+                    }
+                    return;
+                }
+                
+                // Player input
+                if (this.keys['KeyA'] || this.keys['ArrowLeft']) {
+                    this.player.vx = -this.player.speed;
+                }
+                if (this.keys['KeyD'] || this.keys['ArrowRight']) {
+                    this.player.vx = this.player.speed;
+                }
+                if (this.keys['KeyW'] || this.keys['ArrowUp'] || this.keys[' ']) {
+                    if (this.player.jumpCount < this.player.maxJumps) {
+                        this.player.vy = -this.player.jumpPower;
+                        this.player.jumpCount++;
+                        this.player.onGround = false;
+                    }
+                    this.keys['KeyW'] = false;
+                    this.keys['ArrowUp'] = false;
+                    this.keys[' '] = false;
+                }
+                
+                // Apply friction and gravity
+                this.player.vx *= 0.8;
+                this.player.vy += 0.5; // gravity
+                
+                // Update player position
+                this.player.x += this.player.vx;
+                this.player.y += this.player.vy;
+                
+                // Platform collisions
+                this.player.onGround = false;
+                for (let platform of this.platforms) {
+                    if (this.player.x < platform.x + platform.width &&
+                        this.player.x + this.player.width > platform.x &&
+                        this.player.y < platform.y + platform.height &&
+                        this.player.y + this.player.height > platform.y) {
+                        
+                        // Top collision (landing on platform)
+                        if (this.player.vy > 0 && this.player.y < platform.y) {
+                            this.player.y = platform.y - this.player.height;
+                            this.player.vy = 0;
+                            this.player.onGround = true;
+                            this.player.jumpCount = 0;
+                        }
+                        // Bottom collision
+                        else if (this.player.vy < 0 && this.player.y > platform.y) {
+                            this.player.y = platform.y + platform.height;
+                            this.player.vy = 0;
+                        }
+                        // Side collisions
+                        else if (this.player.vx > 0) {
+                            this.player.x = platform.x - this.player.width;
+                        } else if (this.player.vx < 0) {
+                            this.player.x = platform.x + platform.width;
+                        }
+                    }
+                }
+                
+                // Hazard collisions
+                for (let hazard of this.hazards) {
+                    if (this.player.x < hazard.x + hazard.width &&
+                        this.player.x + this.player.width > hazard.x &&
+                        this.player.y < hazard.y + hazard.height &&
+                        this.player.y + this.player.height > hazard.y) {
+                        this.gameOver = true;
+                    }
+                }
+                
+                // Key collection
+                if (this.key && !this.key.collected) {
+                    if (this.player.x < this.key.x + this.key.width &&
+                        this.player.x + this.player.width > this.key.x &&
+                        this.player.y < this.key.y + this.key.height &&
+                        this.player.y + this.player.height > this.key.y) {
+                        this.key.collected = true;
+                        this.hasKey = true;
+                        this.updateUI();
+                    }
+                }
+                
+                // Door collision
+                if (this.door && this.hasKey) {
+                    if (this.player.x < this.door.x + this.door.width &&
+                        this.player.x + this.player.width > this.door.x &&
+                        this.player.y < this.door.y + this.door.height &&
+                        this.player.y + this.player.height > this.door.y) {
+                        this.levelComplete = true;
+                        this.updateUI();
+                    }
+                }
+                
+                // Enemy movement and collision
+                for (let enemy of this.enemies) {
+                    enemy.x += enemy.vx;
+                    
+                    // Patrol behavior
+                    if (enemy.x <= enemy.patrolStart || enemy.x >= enemy.patrolEnd - enemy.width) {
+                        enemy.vx = -enemy.vx;
+                    }
+                    
+                    // Player collision
+                    if (this.player.x < enemy.x + enemy.width &&
+                        this.player.x + this.player.width > enemy.x &&
+                        this.player.y < enemy.y + enemy.height &&
+                        this.player.y + this.player.height > enemy.y) {
+                        this.gameOver = true;
+                    }
+                }
+                
+                // Death from falling
+                if (this.player.y > this.height) {
+                    this.gameOver = true;
+                }
+                
+                // Update camera
+                this.camera.x = this.player.x - this.width / 2;
+                this.camera.x = Math.max(0, Math.min(this.camera.x, this.levelWidth - this.width));
+            }
+            
+            render() {
+                // Clear canvas
+                this.canvas.innerHTML = this.canvas.querySelector('defs').outerHTML;
+                
+                // Render platforms
+                for (let platform of this.platforms) {
+                    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    rect.setAttribute('x', platform.x - this.camera.x);
+                    rect.setAttribute('y', platform.y);
+                    rect.setAttribute('width', platform.width);
+                    rect.setAttribute('height', platform.height);
+                    
+                    if (platform.type === 'grass') {
+                        rect.setAttribute('fill', 'url(#grassGrad)');
+                        rect.setAttribute('stroke', '#228B22');
+                    } else if (platform.type === 'stone') {
+                        rect.setAttribute('fill', 'url(#stoneGrad)');
+                        rect.setAttribute('stroke', '#696969');
+                    } else {
+                        rect.setAttribute('fill', '#8B4513');
+                        rect.setAttribute('stroke', '#654321');
+                    }
+                    rect.setAttribute('stroke-width', '1');
+                    this.canvas.appendChild(rect);
+                }
+                
+                // Render hazards
+                for (let hazard of this.hazards) {
+                    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    rect.setAttribute('x', hazard.x - this.camera.x);
+                    rect.setAttribute('y', hazard.y);
+                    rect.setAttribute('width', hazard.width);
+                    rect.setAttribute('height', hazard.height);
+                    rect.setAttribute('fill', 'url(#waterGrad)');
+                    rect.setAttribute('opacity', '0.8');
+                    this.canvas.appendChild(rect);
+                    
+                    // Water waves effect
+                    const wave = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    wave.setAttribute('d', `M${hazard.x - this.camera.x},${hazard.y + 10} Q${hazard.x - this.camera.x + 25},${hazard.y + 5} ${hazard.x - this.camera.x + 50},${hazard.y + 10} Q${hazard.x - this.camera.x + 75},${hazard.y + 15} ${hazard.x - this.camera.x + 100},${hazard.y + 10}`);
+                    wave.setAttribute('fill', 'none');
+                    wave.setAttribute('stroke', '#87CEEB');
+                    wave.setAttribute('stroke-width', '2');
+                    this.canvas.appendChild(wave);
+                }
+                
+                // Render decorations
+                for (let deco of this.decorations) {
+                    if (deco.type === 'grass_tuft') {
+                        const grass = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                        const x = deco.x - this.camera.x;
+                        const y = deco.y;
+                        grass.setAttribute('points', `${x},${y} ${x-3},${y-8} ${x+3},${y-8}`);
+                        grass.setAttribute('fill', '#32CD32');
+                        this.canvas.appendChild(grass);
+                    } else {
+                        const rock = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                        rock.setAttribute('cx', deco.x - this.camera.x);
+                        rock.setAttribute('cy', deco.y);
+                        rock.setAttribute('r', deco.size);
+                        rock.setAttribute('fill', '#808080');
+                        rock.setAttribute('stroke', '#696969');
+                        this.canvas.appendChild(rock);
+                    }
+                }
+                
+                // Render key
+                if (this.key && !this.key.collected) {
+                    const key = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                    const keyBody = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    keyBody.setAttribute('x', this.key.x - this.camera.x);
+                    keyBody.setAttribute('y', this.key.y + 10);
+                    keyBody.setAttribute('width', 12);
+                    keyBody.setAttribute('height', 4);
+                    keyBody.setAttribute('fill', 'url(#keyGrad)');
+                    
+                    const keyHead = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    keyHead.setAttribute('cx', this.key.x - this.camera.x + 6);
+                    keyHead.setAttribute('cy', this.key.y + 6);
+                    keyHead.setAttribute('r', 6);
+                    keyHead.setAttribute('fill', 'url(#keyGrad)');
+                    keyHead.setAttribute('stroke', '#FFA500');
+                    keyHead.setAttribute('stroke-width', '2');
+                    
+                    key.appendChild(keyHead);
+                    key.appendChild(keyBody);
+                    this.canvas.appendChild(key);
+                }
+                
+                // Render door
+                if (this.door) {
+                    const door = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    door.setAttribute('x', this.door.x - this.camera.x);
+                    door.setAttribute('y', this.door.y);
+                    door.setAttribute('width', this.door.width);
+                    door.setAttribute('height', this.door.height);
+                    door.setAttribute('fill', this.hasKey ? '#90EE90' : '#8B4513');
+                    door.setAttribute('stroke', '#654321');
+                    door.setAttribute('stroke-width', '3');
+                    
+                    // Door handle
+                    const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    handle.setAttribute('cx', this.door.x - this.camera.x + 20);
+                    handle.setAttribute('cy', this.door.y + 20);
+                    handle.setAttribute('r', '3');
+                    handle.setAttribute('fill', '#FFD700');
+                    
+                    this.canvas.appendChild(door);
+                    this.canvas.appendChild(handle);
+                }
+                
+                // Render enemies
+                for (let enemy of this.enemies) {
+                    if (enemy.type === 'spider') {
+                        const spider = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                        
+                        const body = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+                        body.setAttribute('cx', enemy.x - this.camera.x + enemy.width/2);
+                        body.setAttribute('cy', enemy.y + enemy.height/2);
+                        body.setAttribute('rx', enemy.width/2);
+                        body.setAttribute('ry', enemy.height/3);
+                        body.setAttribute('fill', '#800080');
+                        
+                        // Spider legs
+                        for (let i = 0; i < 4; i++) {
+                            const leg = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                            leg.setAttribute('x1', enemy.x - this.camera.x + 5 + i*3);
+                            leg.setAttribute('y1', enemy.y + enemy.height/2);
+                            leg.setAttribute('x2', enemy.x - this.camera.x + 2 + i*4);
+                            leg.setAttribute('y2', enemy.y + enemy.height + 3);
+                            leg.setAttribute('stroke', '#800080');
+                            leg.setAttribute('stroke-width', '2');
+                            spider.appendChild(leg);
+                        }
+                        
+                        spider.appendChild(body);
+                        this.canvas.appendChild(spider);
+                    } else {
+                        // Slime
+                        const slime = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+                        slime.setAttribute('cx', enemy.x - this.camera.x + enemy.width/2);
+                        slime.setAttribute('cy', enemy.y + enemy.height/2);
+                        slime.setAttribute('rx', enemy.width/2);
+                        slime.setAttribute('ry', enemy.height/2);
+                        slime.setAttribute('fill', '#00FF00');
+                        slime.setAttribute('opacity', '0.8');
+                        slime.setAttribute('stroke', '#008000');
+                        slime.setAttribute('stroke-width', '1');
+                        this.canvas.appendChild(slime);
+                    }
+                }
+                
+                // Render player
+                const player = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                
+                // Body
+                const body = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                body.setAttribute('x', this.player.x - this.camera.x);
+                body.setAttribute('y', this.player.y);
+                body.setAttribute('width', this.player.width);
+                body.setAttribute('height', this.player.height);
+                body.setAttribute('fill', this.player.color);
+                body.setAttribute('stroke', '#FF6347');
+                body.setAttribute('stroke-width', '2');
+                body.setAttribute('rx', '3');
+                
+                // Hat
+                const hat = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                hat.setAttribute('x', this.player.x - this.camera.x + 2);
+                hat.setAttribute('y', this.player.y - 5);
+                hat.setAttribute('width', this.player.width - 4);
+                hat.setAttribute('height', 5);
+                hat.setAttribute('fill', '#8B4513');
+                
+                player.appendChild(body);
+                player.appendChild(hat);
+                this.canvas.appendChild(player);
+            }
+            
+            updateUI() {
+                const status = document.getElementById('status');
+                const level = document.getElementById('level');
+                
+                if (this.gameOver) {
+                    status.textContent = 'Game Over! Press R to restart';
+                } else if (this.levelComplete) {
+                    status.textContent = 'Level Complete! Press R for next level';
+                } else if (this.hasKey) {
+                    status.textContent = 'Key found! Head to the door!';
+                } else {
+                    status.textContent = 'Find the key, then reach the door!';
+                }
+                
+                level.textContent = `Level: ${this.level}`;
+            }
+            
+            gameLoop() {
+                this.update();
+                this.render();
+                requestAnimationFrame(() => this.gameLoop());
+            }
+        }
+        
+        // Start the game
+        const game = new Game();
+    </script>
+</body>
+</html>
