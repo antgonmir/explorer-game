@@ -148,8 +148,17 @@
                 this.gameOver = false;
                 this.levelComplete = false;
                 
-                // Ground platforms
-                for (let x = 0; x < this.levelWidth; x += 100) {
+                // Always create a safe starting platform
+                this.platforms.push({
+                    x: 0,
+                    y: this.height - 40,
+                    width: 200,
+                    height: 40,
+                    type: 'ground'
+                });
+                
+                // Ground platforms (starting from after the safe zone)
+                for (let x = 200; x < this.levelWidth; x += 100) {
                     if (Math.random() < 0.8) {
                         this.platforms.push({
                             x: x,
@@ -182,10 +191,10 @@
                     this.platforms.push(platform);
                 }
                 
-                // Enemies
+                // Enemies (but not in the safe starting area)
                 for (let i = 0; i < 5 + this.level; i++) {
                     const enemy = {
-                        x: Math.random() * (this.levelWidth - 200) + 200,
+                        x: Math.random() * (this.levelWidth - 400) + 300, // Start enemies after x=300
                         y: this.height - 80,
                         width: 20,
                         height: 20,
@@ -207,8 +216,9 @@
                     this.enemies.push(enemy);
                 }
                 
-                // Key placement
-                let keyPlatform = this.platforms[Math.floor(Math.random() * this.platforms.length)];
+                // Key placement (not in starting area)
+                let keyPlatforms = this.platforms.filter(p => p.x > 300);
+                let keyPlatform = keyPlatforms[Math.floor(Math.random() * keyPlatforms.length)];
                 this.key = {
                     x: keyPlatform.x + keyPlatform.width / 2,
                     y: keyPlatform.y - 25,
@@ -239,12 +249,12 @@
                     });
                 }
                 
-                // Reset player position
+                // Reset player position (safely on the starting platform)
                 this.player.x = 50;
-                this.player.y = 400;
+                this.player.y = this.height - 40 - this.player.height; // On top of starting platform
                 this.player.vx = 0;
                 this.player.vy = 0;
-                this.player.onGround = false;
+                this.player.onGround = true;
                 this.player.jumpCount = 0;
                 
                 this.updateUI();
@@ -325,6 +335,7 @@
                         this.player.y < hazard.y + hazard.height &&
                         this.player.y + this.player.height > hazard.y) {
                         this.gameOver = true;
+                        this.updateUI();
                     }
                 }
                 
@@ -366,12 +377,14 @@
                         this.player.y < enemy.y + enemy.height &&
                         this.player.y + this.player.height > enemy.y) {
                         this.gameOver = true;
+                        this.updateUI();
                     }
                 }
                 
                 // Death from falling
                 if (this.player.y > this.height) {
                     this.gameOver = true;
+                    this.updateUI();
                 }
                 
                 // Update camera
@@ -563,13 +576,17 @@
                 const level = document.getElementById('level');
                 
                 if (this.gameOver) {
-                    status.textContent = 'Game Over! Press R to restart';
+                    status.textContent = '💀 You died! Press R to restart level';
+                    status.style.color = '#FF4444';
                 } else if (this.levelComplete) {
-                    status.textContent = 'Level Complete! Press R for next level';
+                    status.textContent = '🎉 Level Complete! Press R for next level';
+                    status.style.color = '#44FF44';
                 } else if (this.hasKey) {
-                    status.textContent = 'Key found! Head to the door!';
+                    status.textContent = '🗝️ Key found! Head to the door!';
+                    status.style.color = '#FFD700';
                 } else {
                     status.textContent = 'Find the key, then reach the door!';
+                    status.style.color = 'white';
                 }
                 
                 level.textContent = `Level: ${this.level}`;
