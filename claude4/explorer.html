@@ -664,9 +664,11 @@
             }
             
             findReachableKeyPosition() {
-                // Try to find a reachable position for the key
+                // Try to find a reachable position for the key, prioritizing challenge
                 const candidatePlatforms = this.platforms.filter(p => p.x > 300);
-                const maxAttempts = 50;
+                const maxAttempts = 100;
+                let bestKey = null;
+                let bestScore = -1;
                 
                 for (let attempt = 0; attempt < maxAttempts; attempt++) {
                     const platform = candidatePlatforms[Math.floor(Math.random() * candidatePlatforms.length)];
@@ -675,18 +677,51 @@
                     
                     // Check if this position is reachable
                     if (this.isReachable(keyX, keyY)) {
-                        return {
-                            x: keyX,
-                            y: keyY,
-                            width: 15,
-                            height: 20,
-                            collected: false
-                        };
+                        // Score this position based on challenge factors
+                        let score = 0;
+                        
+                        // Distance from start (further = better)
+                        const distanceFromStart = Math.abs(keyX - 50);
+                        score += distanceFromStart / 10;
+                        
+                        // Height factor (higher = better, but not too high)
+                        const heightFromGround = (this.height - 40) - platform.y;
+                        score += Math.min(heightFromGround / 20, 15);
+                        
+                        // Platform type bonus (floating platforms are more challenging)
+                        if (platform.type !== 'ground') {
+                            score += 20;
+                        }
+                        
+                        // Platform size penalty (smaller platforms = more challenging)
+                        if (platform.width < 100) {
+                            score += 10;
+                        }
+                        
+                        // Avoid platforms that are too close to the start
+                        if (keyX < 500) {
+                            score -= 30;
+                        }
+                        
+                        // Prefer platforms in the middle-to-far range
+                        if (keyX > this.levelWidth * 0.3 && keyX < this.levelWidth * 0.8) {
+                            score += 25;
+                        }
+                        
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestKey = {
+                                x: keyX,
+                                y: keyY,
+                                width: 15,
+                                height: 20,
+                                collected: false
+                            };
+                        }
                     }
                 }
                 
-                // If no reachable position found, return null (will trigger fallback)
-                return null;
+                return bestKey;
             }
 
             gameLoop() {
