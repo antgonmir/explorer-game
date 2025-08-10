@@ -432,7 +432,7 @@
                     ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
                 }
                 
-                // Draw key (with debug info)
+                // Draw key
                 if (this.key && !this.key.collected) {
                     ctx.fillStyle = '#f1c40f';
                     ctx.fillRect(this.key.x, this.key.y, this.key.width, this.key.height);
@@ -440,20 +440,6 @@
                     ctx.fillStyle = '#fff';
                     ctx.fillRect(this.key.x + 4, this.key.y + 4, 2, 2);
                     ctx.fillRect(this.key.x + 10, this.key.y + 8, 2, 2);
-                    
-                    // Debug: Draw key position
-                    ctx.fillStyle = '#fff';
-                    ctx.font = '10px Arial';
-                    ctx.fillText(`Key: ${Math.floor(this.key.x)}, ${Math.floor(this.key.y)}`, this.key.x, this.key.y - 20);
-                } else {
-                    // Debug: Show why key isn't visible
-                    ctx.fillStyle = '#ff0000';
-                    ctx.font = '12px Arial';
-                    if (!this.key) {
-                        ctx.fillText('DEBUG: No key object!', 50, 50);
-                    } else if (this.key.collected) {
-                        ctx.fillText('DEBUG: Key collected!', 50, 50);
-                    }
                 }
                 
                 // Draw door
