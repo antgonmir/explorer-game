@@ -165,15 +165,60 @@
                 const elevatedPlatforms = this.platforms.filter(p => p.y < 500 && p.type === 'platform');
                 
                 if (elevatedPlatforms.length > 0) {
-                    // Place key on a random elevated platform
-                    const keyPlatform = elevatedPlatforms[Math.floor(Math.random() * elevatedPlatforms.length)];
-                    this.key = {
-                        x: keyPlatform.x + keyPlatform.width / 2 - 8,
-                        y: keyPlatform.y - 16,
-                        width: 16,
-                        height: 16,
-                        collected: false
-                    };
+                    // Try multiple times to find a good key position
+                    let keyPlaced = false;
+                    let attempts = 0;
+                    
+                    while (!keyPlaced && attempts < 20) {
+                        const keyPlatform = elevatedPlatforms[Math.floor(Math.random() * elevatedPlatforms.length)];
+                        const keyX = keyPlatform.x + keyPlatform.width / 2 - 8;
+                        const keyY = keyPlatform.y - 16;
+                        
+                        // Check if key position conflicts with any platform or trap
+                        const keyRect = { x: keyX, y: keyY, width: 16, height: 16 };
+                        let hasCollision = false;
+                        
+                        // Check platform collisions
+                        for (let platform of this.platforms) {
+                            if (this.isColliding(keyRect, platform)) {
+                                hasCollision = true;
+                                break;
+                            }
+                        }
+                        
+                        // Check trap collisions
+                        if (!hasCollision) {
+                            for (let trap of this.traps) {
+                                if (this.isColliding(keyRect, trap)) {
+                                    hasCollision = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (!hasCollision && keyY > 0) {
+                            this.key = {
+                                x: keyX,
+                                y: keyY,
+                                width: 16,
+                                height: 16,
+                                collected: false
+                            };
+                            keyPlaced = true;
+                        }
+                        attempts++;
+                    }
+                    
+                    // If still no key placed, force placement on ground
+                    if (!keyPlaced) {
+                        this.key = {
+                            x: 200,
+                            y: 564,
+                            width: 16,
+                            height: 16,
+                            collected: false
+                        };
+                    }
                 } else {
                     // Fallback: place key on ground if no elevated platforms
                     this.key = {
