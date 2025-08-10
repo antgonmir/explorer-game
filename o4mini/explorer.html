@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Procedural 2D Platformer</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #87CEEB; }
+    #game { display: block; background: #87CEEB; }
+    .platform { fill: #8B4513; }
+    .grass { fill: #228B22; }
+    .rock { fill: #A9A9A9; }
+    .door { fill: #654321; stroke: #333; stroke-width: 2; }
+    .key { fill: gold; stroke: #DAA520; stroke-width: 2; }
+    .enemy { fill: red; }
+    .player { fill: #FFD700; stroke: #B8860B; stroke-width: 2; }
+    .water { fill: #1E90FF; opacity: 0.6; }
+    .trap { fill: #8B0000; }
+  </style>
+</head>
+<body>
+<svg id="game" width="800" height="450"></svg>
+<script>
+const svgNS = "http://www.w3.org/2000/svg";
+const W = 800, H = 450;
+const GRAVITY = 0.6;
+
+let svg = document.getElementById('game');
+let keys = {};
+let player = { x: 100, y: 300, vx: 0, vy: 0, w: 32, h: 48, canDoubleJump: true };
+let platforms = [];
+let enemies = [];
+let decorations = [];
+let door = null, key = null;
+let gameGroup;
+
+function init() {
+  svg.innerHTML = '';
+  gameGroup = document.createElementNS(svgNS,'g');
+  svg.appendChild(gameGroup);
+
+  generateLevel();
+  createPlayer();
+  window.requestAnimationFrame(loop);
+}
+
+function generateLevel() {
+  const segmentWidth = 200;
+  const segments = 6;
+  // ground platform
+  platforms.push({ x: 0, y: 380, w: segments * segmentWidth, h: 70 });
+  
+  // random platforms
+  for(let i=1;i<segments;i++){
+    let px = i * segmentWidth + Math.random()* (segmentWidth - 100);
+    let py = 250 + Math.random()*100;
+    platforms.push({ x: px, y: py, w: 100 + Math.random()*50, h: 20 });
+    // maybe decoration grass above
+    decorations.push({ type: 'grass', x: px, y: py-10 });
+    if(Math.random()<0.3){ decorations.push({ type:'rock', x:px+Math.random()*50, y:py-15 }); }
+  }
+  // water trap between segments 2-3
+  platforms.push({ x: segmentWidth*2+30, y: 400, w: 100, h: 50, type:'water' });
+  // trap
+  platforms.push({ x: segmentWidth*4+50, y: 360, w: 50, h:20, type:'trap' });
+  
+  // door at end
+  door = { x: segments*segmentWidth - 60, y: 310, w: 40, h:70 };
+  
+  // key on a random platform
+  let p = platforms[Math.floor(Math.random()*(platforms.length-1))+1];
+  key = { x: p.x + p.w/2 - 10, y: p.y - 20, w:20, h:20, collected:false };
+  
+  // enemies
+  platforms.forEach(pf => {
+    if(Math.random()<0.2 && !pf.type) {
+      enemies.push({ x: pf.x + 10, y: pf.y - 20, w:20, h:20, dir:1 });
+    }
+  });
+}
+
+function draw() {
+  gameGroup.innerHTML = '';
+  // draw platforms & traps & water
+  platforms.forEach(p=>{
+    let rect = document.createElementNS(svgNS,'rect');
+    rect.setAttribute('x',p.x);
+    rect.setAttribute('y',p.y);
+    rect.setAttribute('width',p.w);
+    rect.setAttribute('height',p.h);
+    rect.setAttribute('class', p.type==='water' ? 'water' : p.type==='trap'?'trap':'platform');
+    gameGroup.appendChild(rect);
+  });
+  // decorations
+  decorations.forEach(d=>{
+    let el = document.createElementNS(svgNS,'circle');
+    if(d.type==='grass'){ el.setAttribute('r',8); el.setAttribute('class','grass'); }
+    else { el.setAttribute('r',6); el.setAttribute('class','rock'); }
+    el.setAttribute('cx',d.x); el.setAttribute('cy',d.y);
+    gameGroup.appendChild(el);
+  });
+  // door
+  let dr = document.createElementNS(svgNS,'rect');
+  dr.setAttribute('x',door.x); dr.setAttribute('y',door.y);
+  dr.setAttribute('width',door.w); dr.setAttribute('height',door.h);
+  dr.setAttribute('class','door'); gameGroup.appendChild(dr);
+  // key
+  if(!key.collected){
+    let kr = document.createElementNS(svgNS,'circle');
+    kr.setAttribute('cx',key.x+10); kr.setAttribute('cy',key.y+10);
+    kr.setAttribute('r',10); kr.setAttribute('class','key');
+    gameGroup.appendChild(kr);
+  }
+  // enemies
+  enemies.forEach(e=>{
+    let er = document.createElementNS(svgNS,'rect');
+    er.setAttribute('x',e.x); er.setAttribute('y',e.y);
+    er.setAttribute('width',e.w); er.setAttribute('height',e.h);
+    er.setAttribute('class','enemy'); gameGroup.appendChild(er);
+  });
+  // player
+  let pr = document.createElementNS(svgNS,'rect');
+  pr.setAttribute('x',player.x); pr.setAttribute('y',player.y);
+  pr.setAttribute('width',player.w); pr.setAttribute('height',player.h);
+  pr.setAttribute('class','player'); gameGroup.appendChild(pr);
+}
+
+function update() {
+  // input
+  if(keys['ArrowLeft']) player.vx = -4;
+  else if(keys['ArrowRight']) player.vx = 4;
+  else player.vx = 0;
+  
+  // apply gravity
+  player.vy += GRAVITY;
+  player.x += player.vx; player.y += player.vy;
+  
+  // ground / platforms collision
+  platforms.forEach(p => {
+    if(player.x+player.w>p.x && player.x<p.x+p.w &&
+       player.y+player.h>p.y && player.y+player.h< p.y + player.vy+5) {
+      player.y = p.y - player.h;
+      player.vy = 0;
+      player.canDoubleJump = true;
+    }
+  });
+  
+  // screen wrap left
+  if(player.x<0) player.x=0;
+  // death conditions
+  if(player.y>H || checkCollisionLevel('enemy') || checkCollisionKeyTrapWater()) reset();
+  
+  // enemies move
+  enemies.forEach(e=>{
+    e.x += e.dir * 1.5;
+    if(e.x < e.x-30 || e.x > e.x+30) e.dir *= -1;
+  });
+}
+
+function checkCollision(a,b){
+  return a.x<a.x+b.w && a.x+a.w>b.x && a.y+a.h>b.y && a.y<b.y+b.h;
+}
+
+function checkCollisionLevel(type){
+  if(type==='enemy') return enemies.some(e=>checkCollision(player,e));
+  return false;
+}
+
+function checkCollisionKeyTrapWater(){
+  // key
+  if(!key.collected && player.x<key.x+key.w && player.x+player.w>key.x &&
+     player.y<key.y+key.h && player.y+player.h>key.y) {
+    key.collected = true;
+  }
+  // door
+  if(key.collected && player.x<door.x+door.w && player.x+player.w>door.x &&
+     player.y<door.y+door.h && player.y+player.h>door.y) {
+    alert('Level Complete!'); init(); return false;
+  }
+  // water/trap
+  return platforms.some(p=> (p.type==='water'||p.type==='trap') &&
+    player.x+player.w>p.x && player.x<p.x+p.w &&
+    player.y+player.h>p.y && player.y<p.y+p.h);
+}
+
+function loop() {
+  update(); draw();
+  window.requestAnimationFrame(loop);
+}
+
+function createPlayer(){
+  document.addEventListener('keydown',e=>{
+    keys[e.key]=true;
+    if(e.key===' '){
+      if(player.vy===0) {player.vy=-12;}
+      else if(player.canDoubleJump){player.vy=-10; player.canDoubleJump=false;}
+    }
+  });
+  document.addEventListener('keyup',e=>{ keys[e.key]=false; });
+}
+
+init();
+</script>
+</body>
+</html>

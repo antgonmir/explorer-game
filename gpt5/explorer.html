@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>2D Explorer — Procedural Platformer</title>
+<style>
+  :root{--bg:#0b1220;--fg:#e6eef8;--accent:#ffb86b;}
+  html,body{height:100%;margin:0;font-family:system-ui,Arial;background:var(--bg);color:var(--fg)}
+  #game-wrap{display:flex;align-items:center;justify-content:center;height:100vh}
+  canvas{background:linear-gradient(#071226,#0b1220);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+  #hud{position:fixed;left:16px;top:16px;color:var(--fg);font-size:14px}
+  #controls{position:fixed;right:16px;top:16px;text-align:right;color:#cbd9ee;opacity:.9}
+  a.small{font-size:12px;color:#9fb8e6}
+</style>
+</head>
+<body>
+<div id="game-wrap">
+  <canvas id="c" width="960" height="640"></canvas>
+</div>
+<div id="hud"></div>
+<div id="controls">
+  <div><strong>Controls</strong></div>
+  <div>← → : Move    &nbsp;&nbsp; Space / ↑ : Jump</div>
+  <div>R : Restart room    &nbsp;&nbsp; D : Toggle debug</div>
+  <div class="small">Key placed on reachable platform using jump-physics + BFS (no cheating).</div>
+</div>
+<script>
+// 2D Explorer — single-file HTML/JS
+// Brutally honest: it's simple but robust. You asked for reachable-key logic — got the math.
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width; const H = canvas.height;
+
+// --- Game constants ---
+const GRAVITY = 1800; // px/s^2
+const MOVE_SPEED = 260; // px/s
+const JUMP_V = 650; // px/s initial jump velocity
+const MAX_FALL = 1200;
+
+let debug = false;
+
+// --- Entities ---
+class Rect { constructor(x,y,w,h){this.x=x;this.y=y;this.w=w;this.h=h;} }
+
+class Player {
+  constructor(x,y){
+    this.x=x; this.y=y; this.w=28; this.h=44;
+    this.vx=0; this.vy=0; this.onGround=false; this.facing=1; this.dead=false; this.respawn();
+  }
+  respawn(){ this.x = spawnX; this.y = spawnY; this.vx=0; this.vy=0; this.onGround=false; this.dead=false; }
+  rect(){ return new Rect(this.x,this.y,this.w,this.h); }
+}
+
+class Enemy { constructor(x,y,w,h,platIndex){ this.x=x; this.y=y; this.w=w; this.h=h; this.dir=1; this.speed=80; this.plat=platIndex; } rect(){return new Rect(this.x,this.y,this.w,this.h);} }
+
+// --- Level data ---
+let platforms = []; // {x,y,w,h}
+let enemies = [];
+let spikes = []; // {x,y,w,h}
+let player;
+let key = null; // {x,y,w,h,platIndex}
+let door = null; // {x,y,w,h,platIndex}
+let spawnX = 80, spawnY = 0;
+
+// --- Input ---
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.code]=true; if(e.code==='KeyD') debug=!debug; if(e.code==='KeyR') genRoom(); });
+window.addEventListener('keyup', e => { keys[e.code]=false; });
+
+// --- Utilities ---
+function rectsOverlap(a,b){ return !(a.x+a.w<=b.x || a.x>=b.x+b.w || a.y+a.h<=b.y || a.y>=b.y+b.h); }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+
+// --- Physics helpers for reachability ---
+// Determine whether from platform A you can reach platform B with a jump or by dropping.
+function canReachPlatform(A,B){
+  // A and B are {x,y,w,h} where y is top coordinate of platform (rect top)
+  // Player stands with feet at y (player.y + player.h = platform.y)
+  const yA = A.y - player.h; // player's y when standing on A
+  const yB_top = B.y - player.h; // landing y for player's top? We want player's y such that player's bottom aligns with B.y
+  // Solve vertical motion: y(t) = yA + vy*t - 0.5*g*t^2 = yB_top
+  // => 0.5*g*t^2 - vy*t + (yA - yB_top) = 0
+  const a = 0.5 * GRAVITY;
+  const b = -JUMP_V;
+  const c = (yA - yB_top);
+  const disc = b*b - 4*a*c;
+  const vx = MOVE_SPEED; // assume player can hold max horizontal speed while airborne
+  if(disc >= 0){
+    const sqrt = Math.sqrt(disc);
+    const t1 = (-b - sqrt)/(2*a);
+    const t2 = (-b + sqrt)/(2*a);
+    const ts = [t1,t2].filter(t => t>0 && t<5);
+    for(const t of ts){
+      const reach = vx * t;
+      // From any xA on A to any xB on B: check if reachable
+      const minReachFrom = A.x - reach; // if player stands at left-most
+      const maxReachFrom = A.x + A.w + reach; // if stands at right-most
+      if((B.x + B.w) >= minReachFrom && B.x <= maxReachFrom) return true;
+    }
+  }
+  // Drop down: if B is lower than A and horizontally overlapping, player can walk off and fall
+  if(B.y > A.y){
+    if((B.x + B.w) > A.x && B.x < (A.x + A.w)) return true;
+  }
+  // Also allow walking from A to adjacent overlapping platforms at same level
+  if(Math.abs(B.y - A.y) < 6){
+    if((B.x + B.w) >= A.x - 2 && B.x <= A.x + A.w + 2) return true;
+  }
+  return false;
+}
+
+function buildReachabilityGraph(){
+  const n = platforms.length;
+  const adj = Array.from({length:n}, ()=>[]);
+  for(let i=0;i<n;i++){
+    for(let j=0;j<n;j++) if(i!==j){ if(canReachPlatform(platforms[i], platforms[j])) adj[i].push(j); }
+  }
+  return adj;
+}
+
+function bfsReachable(startIdx){
+  const adj = buildReachabilityGraph();
+  const n = platforms.length;
+  const q = [startIdx];
+  const vis = Array(n).fill(false); vis[startIdx]=true;
+  while(q.length){
+    const u = q.shift();
+    for(const v of adj[u]) if(!vis[v]){ vis[v]=true; q.push(v); }
+  }
+  return vis;
+}
+
+// --- Level generator ---
+function genRoom(){
+  platforms = [];
+  enemies = [];
+  spikes = [];
+  key = null; door = null;
+
+  // Create floor
+  platforms.push({x:0,y:H-64,w:W,h:64});
+
+  // Create some random platforms
+  const platCount = 9 + Math.floor(Math.random()*6);
+  for(let i=0;i<platCount;i++){
+    const w = 80 + Math.random()*220;
+    const x = Math.random()*(W - w - 60) + 30;
+    const y = 120 + Math.random()*(H - 240);
+    platforms.push({x:Math.round(x), y:Math.round(y), w:Math.round(w), h:16});
+  }
+
+  // Add a few larger ledges on right side to make door placement interesting
+  platforms.push({x:W-220, y:H-220, w:200, h:18});
+  platforms.push({x:W-380, y:H-360, w:150, h:18});
+
+  // Merge-sanitize: avoid heavy overlaps by nudging
+  for(let i=1;i<platforms.length;i++){
+    for(let j=1;j<platforms.length;j++) if(i!==j){
+      const A = platforms[i], B = platforms[j];
+      if(Math.abs(A.y - B.y) < 12 && Math.abs((A.x + A.w/2) - (B.x + B.w/2)) < 40){
+        A.x += (Math.random()*120-60);
+        A.y += (Math.random()*50-25);
+        A.x = clamp(A.x, 20, W - A.w - 20);
+        A.y = clamp(A.y, 80, H - 120);
+      }
+    }
+  }
+
+  // player spawn on leftmost floor-ish platform
+  const spawnPlatIdx = 0; // floor
+  spawnX = platforms[spawnPlatIdx].x + 40;
+  spawnY = platforms[spawnPlatIdx].y - 44; // player height
+  player = new Player(spawnX, spawnY);
+
+  // Build reachability and find reachable platforms
+  const reach = bfsReachable(spawnPlatIdx);
+  const reachableIndices = reach.map((v,i)=> v && i!==spawnPlatIdx ? i : -1).filter(i=>i>=0);
+
+  // Choose key platform randomly from reachableIndices, prefer higher but reachable
+  let keyPlat = null;
+  if(reachableIndices.length===0){
+    // fallback: ensure at least some island reachable: make one platform near floor
+    const p = {x:150,y: H-180, w:120, h:16}; platforms.push(p);
+    keyPlat = platforms.length-1;
+  } else {
+    // prefer platforms that are more difficult: higher and with small width
+    reachableIndices.sort((a,b)=> (platforms[b].y - platforms[a].y) || (platforms[a].w - platforms[b].w));
+    // pick among top half randomly
+    const topHalf = reachableIndices.slice(0, Math.max(1, Math.ceil(reachableIndices.length/2)));
+    keyPlat = topHalf[Math.floor(Math.random()*topHalf.length)];
+  }
+
+  // But ensure key placement is actually reachable by recomputing reachability to that platform
+  // (Because platform graph might change after placing additional objects — we keep simple: already computed)
+
+  const kp = platforms[keyPlat];
+  key = {x: kp.x + kp.w/2 - 10, y: kp.y - 24, w:20, h:24, plat: keyPlat };
+
+  // Choose door at far-right reachable platform (prefer rightmost reachable)
+  const reachableForDoor = reach.map((v,i)=> v ? i : -1).filter(i=>i>=0);
+  let doorPlat = reachableForDoor.reduce((acc,i)=> (acc===null || platforms[i].x > platforms[acc].x) ? i : acc, null);
+  if(doorPlat===null) doorPlat = platforms.length-1;
+  const dp = platforms[doorPlat];
+  door = {x: dp.x + dp.w - 36, y: dp.y - 48, w:36, h:48, plat: doorPlat };
+
+  // Add enemies to random reachable platforms (but not key or door)
+  for(const idx of reachableIndices){
+    if(Math.random() < 0.25 && idx !== keyPlat && idx !== doorPlat){
+      const p = platforms[idx];
+      const ex = p.x + 6 + Math.random()*(Math.max(0,p.w-20));
+      enemies.push(new Enemy(ex, p.y - 28, 24, 28, idx));
+    }
+  }
+
+  // Add some spikes/traps near gaps
+  for(let i=0;i<6;i++){
+    if(Math.random()<0.35){
+      const x = 60 + Math.random()*(W-120);
+      const y = H-64 - 14; // on floor
+      spikes.push({x:x,y:y,w:28,h:14});
+    }
+  }
+
+  // Reposition player
+  player.respawn();
+}
+
+// --- Game loop ---
+let last = performance.now();
+let accum = 0;
+function loop(now){
+  const dt = Math.min(0.05, (now-last)/1000);
+  last = now;
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+function update(dt){
+  if(player.dead) return;
+  // input
+  let ax = 0;
+  if(keys['ArrowLeft'] || keys['KeyA']) { ax = -1; player.facing=-1; }
+  if(keys['ArrowRight'] || keys['KeyD']) { ax = 1; player.facing=1; }
+  // horizontal
+  player.vx = ax * MOVE_SPEED;
+  // jump
+  if((keys['Space'] || keys['ArrowUp'] || keys['KeyW']) && player.onGround){
+    player.vy = -JUMP_V; player.onGround=false;
+  }
+  // physics
+  player.vy += GRAVITY * dt;
+  player.vy = clamp(player.vy, -2000, MAX_FALL);
+
+  // horizontal move & collision
+  let nx = player.x + player.vx * dt;
+  const horizRect = new Rect(nx, player.y, player.w, player.h);
+  for(const p of platforms){
+    const platRect = new Rect(p.x, p.y - player.h, p.w, player.h);
+    if(rectsOverlap(horizRect, platRect)){
+      if(player.vx > 0) nx = p.x - player.w - 0.001;
+      else if(player.vx < 0) nx = p.x + p.w + 0.001;
+      player.vx = 0; break;
+    }
+  }
+  player.x = nx;
+
+  // vertical move & collision
+  let ny = player.y + player.vy * dt;
+  let willBeOnGround = false;
+  const vertRect = new Rect(player.x, ny, player.w, player.h);
+  for(const p of platforms){
+    const platRect = new Rect(p.x, p.y - player.h, p.w, player.h);
+    if(rectsOverlap(vertRect, platRect)){
+      if(player.vy > 0){ // falling - land
+        ny = p.y - player.h; player.vy = 0; willBeOnGround = true;
+      } else if(player.vy < 0){ // hitting head
+        ny = p.y - player.h + p.h + 0.01; player.vy = 0;
+      }
+      break;
+    }
+  }
+  player.y = ny; player.onGround = willBeOnGround;
+
+  // check hazards: spikes
+  for(const s of spikes){ if(rectsOverlap(player.rect(), new Rect(s.x, s.y, s.w, s.h))){ player.dead=true; }
+  }
+  // check cliffs (fall off bottom)
+  if(player.y > H + 200) player.dead = true;
+
+  // check key pickup
+  if(key && rectsOverlap(player.rect(), new Rect(key.x, key.y, key.w, key.h))){
+    key = null; player.hasKey = true;
+  }
+
+  // check door
+  if(door && rectsOverlap(player.rect(), new Rect(door.x, door.y, door.w, door.h))){
+    if(player.hasKey){ genRoom(); player.hasKey = false; }
+  }
+
+  // enemy movement & collisions
+  for(const e of enemies){
+    const p = platforms[e.plat];
+    e.x += e.dir * e.speed * dt;
+    if(e.x < p.x + 4){ e.x = p.x + 4; e.dir = 1; }
+    if(e.x + e.w > p.x + p.w - 4){ e.x = p.x + p.w - 4 - e.w; e.dir = -1; }
+    if(rectsOverlap(player.rect(), e.rect())){ player.dead = true; }
+  }
+}
+
+function render(){
+  ctx.clearRect(0,0,W,H);
+  // background
+  const grd = ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,'#081226'); grd.addColorStop(1,'#06121a');
+  ctx.fillStyle = grd; ctx.fillRect(0,0,W,H);
+
+  // draw platforms
+  for(const p of platforms){
+    // platform top
+    ctx.fillStyle = '#39475a';
+    roundedRect(ctx, p.x, p.y, p.w, p.h, 4); ctx.fill();
+    // highlight
+    ctx.fillStyle = '#4b5e72'; ctx.fillRect(p.x+6, p.y+2, Math.max(1,p.w-12), 4);
+  }
+
+  // spikes
+  for(const s of spikes){ drawSpikes(s.x, s.y, s.w); }
+
+  // door
+  if(door){ ctx.fillStyle = '#ffd27f'; roundedRect(ctx, door.x, door.y, door.w, door.h,6); ctx.fill(); ctx.fillStyle='#7b4f25'; ctx.fillRect(door.x+8, door.y+8, 12, 32); }
+
+  // key
+  if(key){ ctx.save(); ctx.translate(key.x + key.w/2, key.y + key.h/2); ctx.rotate(Math.sin(performance.now()/300)*0.15); drawKey(-key.w/2,-key.h/2,key.w,key.h); ctx.restore(); }
+
+  // enemies
+  for(const e of enemies){ ctx.fillStyle = '#e06c75'; roundedRect(ctx, e.x, e.y, e.w, e.h,4); ctx.fill(); }
+
+  // player
+  if(!player.dead){
+    ctx.save(); ctx.translate(player.x + player.w/2, player.y + player.h/2);
+    if(player.facing<0) ctx.scale(-1,1);
+    drawPlayer(-player.w/2,-player.h/2,player.w,player.h);
+    ctx.restore();
+  } else {
+    // death screen
+    ctx.fillStyle='rgba(10,10,20,0.6)'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = '#ffd2d2'; ctx.font='28px system-ui'; ctx.fillText('You died. Press R to restart.', 220, H/2);
+  }
+
+  // debug visuals
+  if(debug){
+    ctx.fillStyle='rgba(255,255,255,0.06)'; ctx.fillRect(0,0,W,H);
+    const adj = buildReachabilityGraph();
+    for(let i=0;i<platforms.length;i++){
+      const p = platforms[i]; ctx.strokeStyle='rgba(255,255,255,0.08)'; ctx.strokeRect(p.x, p.y-2, p.w, 6);
+      for(const j of adj[i]){
+        const aX = p.x + p.w/2, aY = p.y - 8; const b = platforms[j]; const bX = b.x + b.w/2, bY = b.y - 8;
+        ctx.beginPath(); ctx.moveTo(aX,aY); ctx.lineTo(bX,bY); ctx.stroke();
+      }
+    }
+    // draw player rect
+    ctx.strokeStyle='cyan'; const r = player.rect(); ctx.strokeRect(r.x, r.y, r.w, r.h);
+  }
+
+  // HUD
+  document.getElementById('hud').innerHTML = `Key: ${player.hasKey?'<strong style=color:#ffd27f>YES</strong>':'NO'} &nbsp;&nbsp; Debug: ${debug? 'ON' : 'OFF'}`;
+}
+
+// --- draw helpers ---
+function roundedRect(ctx,x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+function drawPlayer(x,y,w,h){ // simple explorer sprite
+  ctx.fillStyle = '#c8e1ff'; roundedRect(ctx,x,y,w,h,4); ctx.fill(); // body
+  ctx.fillStyle = '#2b6b9a'; ctx.fillRect(x+6,y+6,w-12,10); // jacket
+}
+function drawKey(x,y,w,h){ ctx.fillStyle='#ffd27f'; roundedRect(ctx,x,y+6,w,h-6,3); ctx.fill(); ctx.fillStyle='#b86b2f'; ctx.fillRect(x+w/2-3,y+8,6,6); }
+function drawSpikes(x,y,w){ ctx.save(); ctx.translate(x,y); const n = Math.max(1, Math.floor(w/12)); for(let i=0;i<n;i++){ ctx.beginPath(); ctx.moveTo(i*12,14); ctx.lineTo(i*12+6,0); ctx.lineTo(i*12+12,14); ctx.closePath(); ctx.fillStyle='#8a2b2b'; ctx.fill(); } ctx.restore(); }
+
+// --- Start ---
+genRoom();
+player.hasKey = false;
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
