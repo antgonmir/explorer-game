@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cave Explorer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1a1a2e;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+            color: white;
+        }
+        canvas {
+            border: 2px solid #444;
+            background: #0f0f1a;
+        }
+        .ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+        }
+        .controls {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            font-size: 12px;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div class="ui">
+        <div>Room: <span id="room">1</span></div>
+        <div>Lives: <span id="lives">3</span></div>
+        <div id="message" style="color: yellow; font-weight: bold;"></div>
+    </div>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div class="controls">
+        Use ARROW KEYS or WASD to move and jump<br>
+        Press R to regenerate the current room<br>
+        Find the key and reach the door to advance!
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const TILE_SIZE = 20;
+        const ROOM_WIDTH = 40;
+        const ROOM_HEIGHT = 30;
+        const GRAVITY = 0.5;
+        const JUMP_POWER = -12;
+        const MOVE_SPEED = 4;
+
+        class Game {
+            constructor() {
+                this.room = 1;
+                this.lives = 3;
+                this.gameOver = false;
+                this.platforms = [];
+                this.enemies = [];
+                this.traps = [];
+                this.waterHoles = [];
+                this.torches = [];
+                this.particles = [];
+                this.key = null;
+                this.door = null;
+                this.hasKey = false;
+                this.player = {
+                    x: 50,
+                    y: 500,
+                    width: 16,
+                    height: 16,
+                    vx: 0,
+                    vy: 0,
+                    onGround: false,
+                    color: '#4a90e2'
+                };
+                this.keys = {};
+                this.generateRoom();
+                this.bindEvents();
+                this.gameLoop();
+            }
+
+            bindEvents() {
+                window.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+                    
+                    // Handle re-roll room
+                    if (e.code === 'KeyR') {
+                        this.showMessage("Room regenerated!");
+                        this.generateRoom();
+                    }
+                });
+                window.addEventListener('keyup', (e) => {
+                    this.keys[e.code] = false;
+                });
+            }
+
+            generateRoom() {
+                this.platforms = [];
+                this.enemies = [];
+                this.traps = [];
+                this.waterHoles = [];
+                this.torches = [];
+                this.particles = [];
+                this.hasKey = false;
+                
+                // Generate base platforms
+                this.generatePlatforms();
+                
+                // Find valid key placement
+                this.placeKeyAndDoor();
+                
+                // Add enemies and traps
+                this.addHazards();
+                
+                // Add water holes
+                //this.addWaterHoles();
+                
+                // Add torches for atmosphere
+                this.addTorches();
+                
+                // Reset player position
+                this.player.x = 50;
+                this.player.y = 500;
+                this.player.vx = 0;
+                this.player.vy = 0;
+                this.player.onGround = false;
+            }
+
+            generatePlatforms() {
+                // Ground platform
+                this.platforms.push({
+                    x: 0, y: 580, width: 800, height: 20, type: 'ground'
+                });
+                
+                // Generate connected platforms with guaranteed reachability
+                const numLayers = 4 + Math.floor(this.room / 2);
+                let currentY = 500;
+                
+                for (let layer = 0; layer < numLayers; layer++) {
+                    currentY -= 80 + Math.random() * 40;
+                    const platformsInLayer = 2 + Math.floor(Math.random() * 3);
+                    
+                    for (let i = 0; i < platformsInLayer; i++) {
+                        const width = 80 + Math.random() * 100;
+                        const x = (i * 800 / platformsInLayer) + Math.random() * 100 - 50;
+                        const clampedX = Math.max(0, Math.min(x, 800 - width));
+                        
+                        this.platforms.push({
+                            x: clampedX, 
+                            y: currentY, 
+                            width: width, 
+                            height: 20, 
+                            type: 'platform'
+                        });
+                    }
+                }
+                
+                // Add some connecting platforms to ensure reachability
+                for (let i = 0; i < 3; i++) {
+                    const width = 60;
+                    const x = 100 + i * 200 + Math.random() * 100;
+                    const y = 400 + Math.random() * 100;
+                    
+                    this.platforms.push({
+                        x: x, y: y, width: width, height: 20, type: 'platform'
+                    });
+                }
+            }
+
+            placeKeyAndDoor() {
+                // Find elevated platforms (not ground level)
+                const elevatedPlatforms = this.platforms.filter(p => p.y < 500 && p.type === 'platform');
+                
+                if (elevatedPlatforms.length > 0) {
+                    // Try multiple times to find a good key position
+                    let keyPlaced = false;
+                    let attempts = 0;
+                    
+                    while (!keyPlaced && attempts < 20) {
+                        const keyPlatform = elevatedPlatforms[Math.floor(Math.random() * elevatedPlatforms.length)];
+                        const keyX = keyPlatform.x + keyPlatform.width / 2 - 8;
+                        const keyY = keyPlatform.y - 16;
+                        
+                        // Check if key position conflicts with any platform, trap, or water
+                        const keyRect = { x: keyX, y: keyY, width: 16, height: 16 };
+                        let hasCollision = false;
+                        
+                        // Check platform collisions
+                        for (let platform of this.platforms) {
+                            if (this.isColliding(keyRect, platform)) {
+                                hasCollision = true;
+                                break;
+                            }
+                        }
+                        
+                        // Check trap collisions
+                        if (!hasCollision) {
+                            for (let trap of this.traps) {
+                                if (this.isColliding(keyRect, trap)) {
+                                    hasCollision = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // Check water hole collisions
+                        if (!hasCollision) {
+                            for (let water of this.waterHoles) {
+                                if (this.isColliding(keyRect, water)) {
+                                    hasCollision = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (!hasCollision && keyY > 0) {
+                            this.key = {
+                                x: keyX,
+                                y: keyY,
+                                width: 16,
+                                height: 16,
+                                collected: false
+                            };
+                            keyPlaced = true;
+                        }
+                        attempts++;
+                    }
+                    
+                    // If still no key placed, force placement on ground
+                    if (!keyPlaced) {
+                        this.key = {
+                            x: 200,
+                            y: 564,
+                            width: 16,
+                            height: 16,
+                            collected: false
+                        };
+                    }
+                } else {
+                    // Fallback: place key on ground if no elevated platforms
+                    this.key = {
+                        x: 400,
+                        y: 564,
+                        width: 16,
+                        height: 16,
+                        collected: false
+                    };
+                }
+                
+                // Place door on ground level
+                this.door = {
+                    x: 720,
+                    y: 540,
+                    width: 20,
+                    height: 40
+                };
+            }
+
+            findReachablePlatforms() {
+                // Simple reachability check using flood fill
+                const visited = new Set();
+                const reachable = [];
+                const startPlatform = this.platforms.find(p => p.type === 'ground');
+                
+                const queue = [startPlatform];
+                visited.add(startPlatform);
+                reachable.push(startPlatform);
+                
+                while (queue.length > 0) {
+                    const current = queue.shift();
+                    
+                    for (let platform of this.platforms) {
+                        if (visited.has(platform)) continue;
+                        
+                        // Check if platform is reachable by jumping
+                        const dx = Math.abs(current.x + current.width/2 - platform.x - platform.width/2);
+                        const dy = current.y - platform.y;
+                        
+                        // Can jump to it (horizontal distance < 150, vertical jump < 250)
+                        if (dx < 150 && dy > -250 && dy < 50) {
+                            visited.add(platform);
+                            reachable.push(platform);
+                            queue.push(platform);
+                        }
+                    }
+                }
+                
+                // Return platforms that are elevated (not ground level)
+                return reachable.filter(p => p.y < 500);
+            }
+
+            addHazards() {
+                // Add moving enemies
+                for (let i = 0; i < 3 + Math.floor(this.room / 3); i++) {
+                    const platform = this.platforms[Math.floor(Math.random() * this.platforms.length)];
+                    this.enemies.push({
+                        x: platform.x + Math.random() * (platform.width - 16),
+                        y: platform.y - 16,
+                        width: 16,
+                        height: 16,
+                        vx: 1 + Math.random(),
+                        platform: platform,
+                        color: '#e74c3c'
+                    });
+                }
+                
+                // Add spike traps
+                for (let i = 0; i < 2 + Math.floor(this.room / 2); i++) {
+                    const platform = this.platforms[Math.floor(Math.random() * this.platforms.length)];
+                    this.traps.push({
+                        x: platform.x + Math.random() * (platform.width - 20),
+                        y: platform.y - 10,
+                        width: 20,
+                        height: 10,
+                        type: 'spike'
+                    });
+                }
+            }
+
+            addWaterHoles() {
+                // Add water holes on ground level
+                for (let i = 0; i < 1 + Math.floor(this.room / 4); i++) {
+                    const width = 40 + Math.random() * 60;
+                    const x = 100 + Math.random() * (600 - width);
+                    
+                    // Make sure water hole doesn't overlap with player start or door
+                    if (x < 100 || x + width > 680) continue;
+                    
+                    this.waterHoles.push({
+                        x: x,
+                        y: 580,
+                        width: width,
+                        height: 20,
+                        waveOffset: Math.random() * Math.PI * 2
+                    });
+                }
+            }
+
+            addTorches() {
+                // Add torches for atmosphere
+                const numTorches = 3 + Math.floor(Math.random() * 4);
+                for (let i = 0; i < numTorches; i++) {
+                    const platform = this.platforms[Math.floor(Math.random() * this.platforms.length)];
+                    this.torches.push({
+                        x: platform.x + Math.random() * (platform.width - 10),
+                        y: platform.y - 25,
+                        width: 6,
+                        height: 15,
+                        flickerTime: Math.random() * Math.PI * 2
+                    });
+                }
+            }
+
+            update() {
+                if (this.gameOver) return;
+                
+                this.handleInput();
+                this.updatePlayer();
+                this.updateEnemies();
+                this.updateParticles();
+                this.checkCollisions();
+                this.updateUI();
+            }
+
+            handleInput() {
+                // Movement
+                if (this.keys['ArrowLeft'] || this.keys['KeyA']) {
+                    this.player.vx = -MOVE_SPEED;
+                } else if (this.keys['ArrowRight'] || this.keys['KeyD']) {
+                    this.player.vx = MOVE_SPEED;
+                } else {
+                    this.player.vx *= 0.8; // Friction
+                }
+                
+                // Jump
+                if ((this.keys['ArrowUp'] || this.keys['KeyW'] || this.keys['Space']) && this.player.onGround) {
+                    this.player.vy = JUMP_POWER;
+                    this.player.onGround = false;
+                }
+            }
+
+            updatePlayer() {
+                // Apply gravity
+                this.player.vy += GRAVITY;
+                
+                // Update position
+                this.player.x += this.player.vx;
+                this.player.y += this.player.vy;
+                
+                // Keep player in bounds
+                this.player.x = Math.max(0, Math.min(this.player.x, 800 - this.player.width));
+                
+                // Reset onGround
+                this.player.onGround = false;
+                
+                // Platform collisions
+                for (let platform of this.platforms) {
+                    if (this.isColliding(this.player, platform)) {
+                        // Landing on top
+                        if (this.player.vy > 0 && this.player.y < platform.y) {
+                            this.player.y = platform.y - this.player.height;
+                            this.player.vy = 0;
+                            this.player.onGround = true;
+                        }
+                    }
+                }
+                
+                // Death by falling
+                if (this.player.y > 600) {
+                    this.playerDie();
+                }
+            }
+
+            updateEnemies() {
+                for (let enemy of this.enemies) {
+                    enemy.x += enemy.vx;
+                    
+                    // Bounce off platform edges
+                    if (enemy.x <= enemy.platform.x || enemy.x >= enemy.platform.x + enemy.platform.width - enemy.width) {
+                        enemy.vx *= -1;
+                    }
+                    
+                    // Keep enemy on platform
+                    enemy.x = Math.max(enemy.platform.x, Math.min(enemy.x, enemy.platform.x + enemy.platform.width - enemy.width));
+                }
+            }
+
+            updateParticles() {
+                // Update existing particles
+                this.particles = this.particles.filter(particle => {
+                    particle.x += particle.vx;
+                    particle.y += particle.vy;
+                    particle.life--;
+                    particle.vy -= 0.05; // Slight upward drift
+                    return particle.life > 0;
+                });
+                
+                // Generate new torch particles
+                for (let torch of this.torches) {
+                    torch.flickerTime += 0.1;
+                    
+                    // Randomly spawn flame particles
+                    if (Math.random() < 0.3) {
+                        this.particles.push({
+                            x: torch.x + torch.width/2 + (Math.random() - 0.5) * 4,
+                            y: torch.y - 5,
+                            vx: (Math.random() - 0.5) * 0.5,
+                            vy: -Math.random() * 2,
+                            life: 20 + Math.random() * 20,
+                            maxLife: 40,
+                            color: Math.random() < 0.7 ? '#ff6b35' : '#ffd23f'
+                        });
+                    }
+                }
+            }
+
+            checkCollisions() {
+                // Key collection
+                if (this.key && !this.key.collected && this.isColliding(this.player, this.key)) {
+                    this.key.collected = true;
+                    this.hasKey = true;
+                    this.showMessage("Key collected! Find the door!");
+                }
+                
+                // Door interaction
+                if (this.door && this.isColliding(this.player, this.door)) {
+                    if (this.hasKey) {
+                        this.nextRoom();
+                    } else {
+                        this.showMessage("You need the key first!");
+                    }
+                }
+                
+                // Enemy collisions
+                for (let enemy of this.enemies) {
+                    if (this.isColliding(this.player, enemy)) {
+                        this.playerDie();
+                        return;
+                    }
+                }
+                
+                // Trap collisions
+                for (let trap of this.traps) {
+                    if (this.isColliding(this.player, trap)) {
+                        this.playerDie();
+                        return;
+                    }
+                }
+                
+                // Water hole collisions
+                for (let water of this.waterHoles) {
+                    if (this.isColliding(this.player, water)) {
+                        this.playerDie();
+                        return;
+                    }
+                }
+            }
+
+            isColliding(rect1, rect2) {
+                return rect1.x < rect2.x + rect2.width &&
+                       rect1.x + rect1.width > rect2.x &&
+                       rect1.y < rect2.y + rect2.height &&
+                       rect1.y + rect1.height > rect2.y;
+            }
+
+            playerDie() {
+                this.lives--;
+                if (this.lives <= 0) {
+                    this.gameOver = true;
+                    this.showMessage("Game Over! Refresh to restart.");
+                } else {
+                    this.showMessage("You died! Try again...");
+                    // Reset player position
+                    this.player.x = 50;
+                    this.player.y = 500;
+                    this.player.vx = 0;
+                    this.player.vy = 0;
+                }
+            }
+
+            nextRoom() {
+                this.room++;
+                this.showMessage(`Entering room ${this.room}!`);
+                this.generateRoom();
+            }
+
+            showMessage(text) {
+                const messageEl = document.getElementById('message');
+                messageEl.textContent = text;
+                setTimeout(() => {
+                    messageEl.textContent = '';
+                }, 3000);
+            }
+
+            updateUI() {
+                document.getElementById('room').textContent = this.room;
+                document.getElementById('lives').textContent = this.lives;
+            }
+
+            render() {
+                // Clear canvas
+                ctx.fillStyle = '#0f0f1a';
+                ctx.fillRect(0, 0, 800, 600);
+                
+                // Draw platforms
+                ctx.fillStyle = '#654321';
+                for (let platform of this.platforms) {
+                    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+                }
+                
+                // Draw water holes
+                for (let water of this.waterHoles) {
+                    water.waveOffset += 0.1;
+                    
+                    // Water base
+                    ctx.fillStyle = '#1e6091';
+                    ctx.fillRect(water.x, water.y, water.width, water.height);
+                    
+                    // Animated water surface
+                    ctx.fillStyle = '#2980b9';
+                    for (let i = 0; i < water.width; i += 2) {
+                        const waveHeight = Math.sin(water.waveOffset + i * 0.1) * 2;
+                        ctx.fillRect(water.x + i, water.y + waveHeight, 2, 3);
+                    }
+                }
+                
+                // Draw torches
+                for (let torch of this.torches) {
+                    // Torch base
+                    ctx.fillStyle = '#8B4513';
+                    ctx.fillRect(torch.x, torch.y + 10, torch.width, torch.height - 10);
+                    
+                    // Flame
+                    const flicker = Math.sin(torch.flickerTime) * 2;
+                    ctx.fillStyle = '#ff6b35';
+                    ctx.fillRect(torch.x + 1, torch.y - 5 + flicker, torch.width - 2, 15);
+                    ctx.fillStyle = '#ffd23f';
+                    ctx.fillRect(torch.x + 2, torch.y - 2 + flicker, torch.width - 4, 8);
+                }
+                
+                // Draw particles
+                for (let particle of this.particles) {
+                    const alpha = particle.life / particle.maxLife;
+                    const size = Math.max(1, alpha * 3);
+                    
+                    ctx.globalAlpha = alpha;
+                    ctx.fillStyle = particle.color;
+                    ctx.fillRect(particle.x - size/2, particle.y - size/2, size, size);
+                }
+                ctx.globalAlpha = 1;
+                
+                // Draw traps
+                ctx.fillStyle = '#666';
+                for (let trap of this.traps) {
+                    ctx.fillRect(trap.x, trap.y, trap.width, trap.height);
+                    // Draw spikes
+                    ctx.fillStyle = '#ff4444';
+                    for (let i = 0; i < trap.width; i += 4) {
+                        ctx.fillRect(trap.x + i, trap.y - 6, 2, 6);
+                    }
+                    ctx.fillStyle = '#666';
+                }
+                
+                // Draw enemies
+                ctx.fillStyle = '#e74c3c';
+                for (let enemy of this.enemies) {
+                    ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+                }
+                
+                // Draw key
+                if (this.key && !this.key.collected) {
+                    ctx.fillStyle = '#f1c40f';
+                    ctx.fillRect(this.key.x, this.key.y, this.key.width, this.key.height);
+                    // Key sparkle effect
+                    ctx.fillStyle = '#fff';
+                    ctx.fillRect(this.key.x + 4, this.key.y + 4, 2, 2);
+                    ctx.fillRect(this.key.x + 10, this.key.y + 8, 2, 2);
+                }
+                
+                // Draw door
+                if (this.door) {
+                    ctx.fillStyle = this.hasKey ? '#2ecc71' : '#7f8c8d';
+                    ctx.fillRect(this.door.x, this.door.y, this.door.width, this.door.height);
+                    // Door handle
+                    ctx.fillStyle = '#444';
+                    ctx.fillRect(this.door.x + this.door.width - 6, this.door.y + this.door.height/2 - 2, 4, 4);
+                }
+                
+                // Draw player
+                ctx.fillStyle = this.player.color;
+                ctx.fillRect(this.player.x, this.player.y, this.player.width, this.player.height);
+                
+                // Player eyes
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(this.player.x + 3, this.player.y + 3, 2, 2);
+                ctx.fillRect(this.player.x + 9, this.player.y + 3, 2, 2);
+                
+                // Key indicator
+                if (this.hasKey) {
+                    ctx.fillStyle = '#f1c40f';
+                    ctx.fillRect(this.player.x + this.player.width - 6, this.player.y - 8, 6, 6);
+                }
+            }
+
+            gameLoop() {
+                this.update();
+                this.render();
+                requestAnimationFrame(() => this.gameLoop());
+            }
+        }
+
+        // Start the game
+        const game = new Game();
+    </script>
+</body>
+</html>
