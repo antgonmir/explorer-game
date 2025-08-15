@@ -43,6 +43,7 @@ class Player:
         self.on_ground = False
         self.has_key = False
         self.alive = True
+        self.jump_pressed = False  # Track if jump key is currently pressed
         
     def update(self, platforms, enemies, traps):
         if not self.alive:
@@ -315,10 +316,7 @@ class Game:
             if event.type == pygame.QUIT:
                 self.running = False
             elif event.type == pygame.KEYDOWN:
-                if self.state == GameState.PLAYING:
-                    if event.key == pygame.K_SPACE:
-                        self.player.jump()
-                elif self.state == GameState.GAME_OVER:
+                if self.state == GameState.GAME_OVER:
                     if event.key == pygame.K_r:
                         self.room_number = 1
                         self.state = GameState.PLAYING
@@ -339,6 +337,15 @@ class Game:
                 self.player.vel_x = -PLAYER_SPEED
             if keys[pygame.K_RIGHT]:
                 self.player.vel_x = PLAYER_SPEED
+                
+            # Handle jump input with improved responsiveness
+            if keys[pygame.K_SPACE]:
+                if not self.player.jump_pressed:  # Just pressed
+                    if self.player.on_ground:
+                        self.player.jump()
+                    self.player.jump_pressed = True
+            else:
+                self.player.jump_pressed = False
                 
             # Update game objects
             self.player.update(self.platforms, self.enemies, self.traps)

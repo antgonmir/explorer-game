@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cave Explorer - 2D Platformer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1a1a2e;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+        }
+        canvas {
+            border: 2px solid #16213e;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <script>
+        let player, key, door, platforms, enemies, spikes, room;
+        let hasKey = false;
+        let gameState = 'playing'; // 'playing', 'won', 'dead'
+        let roomNumber = 1;
+        let cameraY = 0;
+        
+        class Player {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.w = 20;
+                this.h = 20;
+                this.vx = 0;
+                this.vy = 0;
+                this.grounded = false;
+                this.speed = 4;
+                this.jumpPower = -12;
+                this.gravity = 0.6;
+                this.maxFallSpeed = 15;
+                this.color = hasKey ? color(255, 215, 0) : color(100, 200, 255);
+            }
+            
+            update() {
+                // Horizontal movement
+                if (keyIsDown(LEFT_ARROW) || keyIsDown(65)) { // A key
+                    this.vx = -this.speed;
+                } else if (keyIsDown(RIGHT_ARROW) || keyIsDown(68)) { // D key
+                    this.vx = this.speed;
+                } else {
+                    this.vx *= 0.8; // friction
+                }
+                
+                // Jump
+                if ((keyIsDown(UP_ARROW) || keyIsDown(87) || keyIsDown(32)) && this.grounded) { // W or SPACE
+                    this.vy = this.jumpPower;
+                    this.grounded = false;
+                }
+                
+                // Apply gravity
+                this.vy += this.gravity;
+                if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
+                
+                // Update position
+                this.x += this.vx;
+                this.y += this.vy;
+                
+                // Collision with platforms
+                this.grounded = false;
+                for (let platform of platforms) {
+                    if (this.collidesWith(platform)) {
+                        // Top collision (landing)
+                        if (this.vy > 0 && this.y + this.h - this.vy <= platform.y) {
+                            this.y = platform.y - this.h;
+                            this.vy = 0;
+                            this.grounded = true;
+                        }
+                        // Bottom collision (hitting ceiling)
+                        else if (this.vy < 0 && this.y - this.vy >= platform.y + platform.h) {
+                            this.y = platform.y + platform.h;
+                            this.vy = 0;
+                        }
+                        // Side collisions
+                        else if (this.vx > 0 && this.x + this.w - this.vx <= platform.x) {
+                            this.x = platform.x - this.w;
+                            this.vx = 0;
+                        }
+                        else if (this.vx < 0 && this.x - this.vx >= platform.x + platform.w) {
+                            this.x = platform.x + platform.w;
+                            this.vx = 0;
+                        }
+                    }
+                }
+                
+                // Screen boundaries
+                if (this.x < 0) this.x = 0;
+                if (this.x + this.w > width) this.x = width - this.w;
+                
+                // Fall death
+                if (this.y > height + 200) {
+                    gameState = 'dead';
+                }
+                
+                // Update color based on key status
+                this.color = hasKey ? color(255, 215, 0) : color(100, 200, 255);
+            }
+            
+            collidesWith(obj) {
+                return this.x < obj.x + obj.w &&
+                       this.x + this.w > obj.x &&
+                       this.y < obj.y + obj.h &&
+                       this.y + this.h > obj.y;
+            }
+            
+            draw() {
+                push();
+                translate(0, -cameraY);
+                
+                // Player glow effect
+                drawingContext.shadowColor = hasKey ? '#FFD700' : '#64C8FF';
+                drawingContext.shadowBlur = 15;
+                
+                fill(this.color);
+                noStroke();
+                rect(this.x, this.y, this.w, this.h, 3);
+                
+                // Eyes
+                fill(255);
+                circle(this.x + 6, this.y + 7, 4);
+                circle(this.x + 14, this.y + 7, 4);
+                fill(0);
+                circle(this.x + 6, this.y + 7, 2);
+                circle(this.x + 14, this.y + 7, 2);
+                
+                drawingContext.shadowBlur = 0;
+                pop();
+            }
+        }
+        
+        class Enemy {
+            constructor(x, y, w, h, type) {
+                this.x = x;
+                this.y = y;
+                this.w = w;
+                this.h = h;
+                this.vx = random(1, 3) * (random() > 0.5 ? 1 : -1);
+                this.vy = 0;
+                this.type = type;
+                this.startX = x;
+                this.range = random(80, 150);
+                this.color = type === 'patrol' ? color(255, 100, 100) : color(255, 150, 50);
+            }
+            
+            update() {
+                if (this.type === 'patrol') {
+                    // Patrol enemy - moves back and forth
+                    this.x += this.vx;
+                    if (this.x <= this.startX - this.range || this.x >= this.startX + this.range) {
+                        this.vx *= -1;
+                    }
+                    
+                    // Platform collision for patrol enemies
+                    for (let platform of platforms) {
+                        if (this.collidesWith(platform)) {
+                            if (this.vy > 0 && this.y + this.h - this.vy <= platform.y) {
+                                this.y = platform.y - this.h;
+                                this.vy = 0;
+                            }
+                        }
+                    }
+                    
+                    this.vy += 0.5; // light gravity
+                    this.y += this.vy;
+                } else if (this.type === 'floater') {
+                    // Floating enemy - moves in sine wave
+                    this.x += this.vx;
+                    this.y += sin(frameCount * 0.05 + this.startX * 0.01) * 2;
+                    
+                    if (this.x <= 0 || this.x >= width - this.w) {
+                        this.vx *= -1;
+                    }
+                }
+            }
+            
+            collidesWith(obj) {
+                return this.x < obj.x + obj.w &&
+                       this.x + this.w > obj.x &&
+                       this.y < obj.y + obj.h &&
+                       this.y + this.h > obj.y;
+            }
+            
+            draw() {
+                push();
+                translate(0, -cameraY);
+                
+                // Enemy glow
+                drawingContext.shadowColor = this.type === 'patrol' ? '#FF6464' : '#FF9632';
+                drawingContext.shadowBlur = 10;
+                
+                fill(this.color);
+                noStroke();
+                if (this.type === 'patrol') {
+                    rect(this.x, this.y, this.w, this.h, 2);
+                    // Spikes on top
+                    fill(150, 50, 50);
+                    for (let i = 0; i < this.w; i += 8) {
+                        triangle(this.x + i, this.y, this.x + i + 4, this.y - 5, this.x + i + 8, this.y);
+                    }
+                } else {
+                    ellipse(this.x + this.w/2, this.y + this.h/2, this.w, this.h);
+                    // Tentacles
+                    stroke(this.color);
+                    strokeWeight(2);
+                    for (let i = 0; i < 3; i++) {
+                        let tentacleX = this.x + this.w/2 + (i - 1) * 8;
+                        let tentacleY = this.y + this.h;
+                        let waveOffset = sin(frameCount * 0.1 + i) * 5;
+                        line(tentacleX, tentacleY, tentacleX + waveOffset, tentacleY + 15);
+                    }
+                }
+                
+                drawingContext.shadowBlur = 0;
+                pop();
+            }
+        }
+        
+        class Spike {
+            constructor(x, y, w, h) {
+                this.x = x;
+                this.y = y;
+                this.w = w;
+                this.h = h;
+            }
+            
+            draw() {
+                push();
+                translate(0, -cameraY);
+                
+                drawingContext.shadowColor = '#FF4444';
+                drawingContext.shadowBlur = 5;
+                
+                fill(200, 50, 50);
+                noStroke();
+                
+                // Draw spikes
+                for (let i = 0; i < this.w; i += 15) {
+                    triangle(this.x + i, this.y + this.h, 
+                            this.x + i + 7.5, this.y, 
+                            this.x + i + 15, this.y + this.h);
+                }
+                
+                drawingContext.shadowBlur = 0;
+                pop();
+            }
+            
+            collidesWith(obj) {
+                return this.x < obj.x + obj.w &&
+                       this.x + this.w > obj.x &&
+                       this.y < obj.y + obj.h &&
+                       this.y + this.h > obj.y;
+            }
+        }
+        
+        function setup() {
+            createCanvas(800, 600);
+            generateRoom();
+        }
+        
+        function generateRoom() {
+            platforms = [];
+            enemies = [];
+            spikes = [];
+            hasKey = false;
+            gameState = 'playing';
+            
+            // Create platforms
+            platforms.push({x: 0, y: height - 40, w: width, h: 40}); // ground
+            
+            // Add random platforms
+            for (let i = 0; i < random(8, 15); i++) {
+                let pw = random(80, 200);
+                let px = random(0, width - pw);
+                let py = random(100, height - 200);
+                platforms.push({x: px, y: py, w: pw, h: 20});
+            }
+            
+            // Add some vertical platforms (walls)
+            for (let i = 0; i < random(2, 5); i++) {
+                let pw = 20;
+                let ph = random(60, 150);
+                let px = random(50, width - 50);
+                let py = random(50, height - ph - 50);
+                platforms.push({x: px, y: py, w: pw, h: ph});
+            }
+            
+            // Create player starting position
+            let startPlatform = platforms[1] || platforms[0];
+            player = new Player(startPlatform.x + 10, startPlatform.y - 25);
+            
+            // Create key at random safe location
+            let keyPlatform = platforms[floor(random(1, platforms.length))];
+            key = {
+                x: keyPlatform.x + random(10, keyPlatform.w - 30),
+                y: keyPlatform.y - 25,
+                w: 15,
+                h: 15,
+                collected: false,
+                angle: 0
+            };
+            
+            // Create door
+            let doorPlatform = platforms[floor(random(1, platforms.length))];
+            door = {
+                x: doorPlatform.x + doorPlatform.w - 30,
+                y: doorPlatform.y - 40,
+                w: 25,
+                h: 40
+            };
+            
+            // Create enemies
+            for (let i = 0; i < random(3, 7); i++) {
+                let enemyPlatform = platforms[floor(random(1, platforms.length))];
+                if (dist(enemyPlatform.x, enemyPlatform.y, player.x, player.y) > 100) {
+                    let enemyType = random(['patrol', 'floater']);
+                    enemies.push(new Enemy(
+                        enemyPlatform.x + random(20, enemyPlatform.w - 40),
+                        enemyPlatform.y - 25,
+                        20, 20, enemyType
+                    ));
+                }
+            }
+            
+            // Create spikes
+            for (let i = 0; i < random(2, 5); i++) {
+                let spikePlatform = platforms[floor(random(1, platforms.length))];
+                if (dist(spikePlatform.x, spikePlatform.y, player.x, player.y) > 80) {
+                    spikes.push(new Spike(
+                        spikePlatform.x + random(0, spikePlatform.w - 60),
+                        spikePlatform.y - 15,
+                        60, 15
+                    ));
+                }
+            }
+            
+            cameraY = 0;
+        }
+        
+        function draw() {
+            background(20, 20, 40);
+            
+            // Update camera to follow player
+            let targetCameraY = player.y - height/2;
+            cameraY = lerp(cameraY, targetCameraY, 0.05);
+            
+            if (gameState === 'playing') {
+                // Update game objects
+                player.update();
+                
+                for (let enemy of enemies) {
+                    enemy.update();
+                    if (enemy.collidesWith(player)) {
+                        gameState = 'dead';
+                    }
+                }
+                
+                // Check spike collisions
+                for (let spike of spikes) {
+                    if (spike.collidesWith(player)) {
+                        gameState = 'dead';
+                    }
+                }
+                
+                // Check key collection
+                if (!key.collected && player.collidesWith(key)) {
+                    key.collected = true;
+                    hasKey = true;
+                }
+                
+                // Check door collision
+                if (hasKey && player.collidesWith(door)) {
+                    gameState = 'won';
+                }
+            }
+            
+            // Draw everything
+            drawPlatforms();
+            drawSpikes();
+            drawEnemies();
+            drawKey();
+            drawDoor();
+            player.draw();
+            drawUI();
+            
+            // Draw game state messages
+            if (gameState === 'won') {
+                drawWinScreen();
+            } else if (gameState === 'dead') {
+                drawDeathScreen();
+            }
+        }
+        
+        function drawPlatforms() {
+            push();
+            translate(0, -cameraY);
+            
+            for (let platform of platforms) {
+                // Platform gradient
+                drawingContext.shadowColor = '#4A90E2';
+                drawingContext.shadowBlur = 3;
+                
+                fill(80, 90, 120);
+                stroke(120, 130, 160);
+                strokeWeight(1);
+                rect(platform.x, platform.y, platform.w, platform.h, 2);
+                
+                // Platform highlight
+                fill(100, 110, 140, 150);
+                rect(platform.x, platform.y, platform.w, 3, 2);
+            }
+            
+            drawingContext.shadowBlur = 0;
+            pop();
+        }
+        
+        function drawSpikes() {
+            for (let spike of spikes) {
+                spike.draw();
+            }
+        }
+        
+        function drawEnemies() {
+            for (let enemy of enemies) {
+                enemy.draw();
+            }
+        }
+        
+        function drawKey() {
+            if (!key.collected) {
+                push();
+                translate(0, -cameraY);
+                
+                key.angle += 0.05;
+                
+                drawingContext.shadowColor = '#FFD700';
+                drawingContext.shadowBlur = 20;
+                
+                push();
+                translate(key.x + key.w/2, key.y + key.h/2 + sin(frameCount * 0.1) * 3);
+                rotate(key.angle);
+                
+                fill(255, 215, 0);
+                noStroke();
+                rect(-key.w/2, -key.h/2, key.w, key.h, 2);
+                
+                // Key teeth
+                fill(255, 215, 0);
+                rect(key.w/2 - 2, -3, 5, 3);
+                rect(key.w/2 - 2, 1, 3, 2);
+                
+                // Key hole
+                fill(20, 20, 40);
+                circle(-key.w/4, 0, 4);
+                
+                pop();
+                drawingContext.shadowBlur = 0;
+                pop();
+            }
+        }
+        
+        function drawDoor() {
+            push();
+            translate(0, -cameraY);
+            
+            let doorColor = hasKey ? color(100, 255, 100) : color(150, 100, 100);
+            drawingContext.shadowColor = hasKey ? '#64FF64' : '#966464';
+            drawingContext.shadowBlur = hasKey ? 15 : 5;
+            
+            fill(doorColor);
+            stroke(hasKey ? color(150, 255, 150) : color(100, 70, 70));
+            strokeWeight(2);
+            rect(door.x, door.y, door.w, door.h, 3);
+            
+            // Door handle
+            fill(200, 180, 100);
+            circle(door.x + door.w - 8, door.y + door.h/2, 4);
+            
+            drawingContext.shadowBlur = 0;
+            pop();
+        }
+        
+        function drawUI() {
+            // Instructions
+            fill(255, 255, 255, 200);
+            textAlign(LEFT);
+            textSize(14);
+            text("ARROW KEYS or WASD: Move & Jump", 10, 25);
+            text("Collect the KEY and reach the DOOR!", 10, 45);
+            text(`Room: ${roomNumber}`, 10, 65);
+            
+            if (hasKey) {
+                fill(255, 215, 0);
+                text("KEY COLLECTED! Find the door!", 10, 85);
+            }
+            
+            // Health/lives indicator
+            fill(255, 100, 100);
+            textAlign(RIGHT);
+            text("Avoid red enemies and spikes!", width - 10, 25);
+        }
+        
+        function drawWinScreen() {
+            fill(0, 0, 0, 150);
+            rect(0, 0, width, height);
+            
+            fill(100, 255, 100);
+            textAlign(CENTER);
+            textSize(32);
+            text("ROOM COMPLETE!", width/2, height/2 - 20);
+            
+            fill(255);
+            textSize(18);
+            text("Press SPACE for next room", width/2, height/2 + 20);
+        }
+        
+        function drawDeathScreen() {
+            fill(0, 0, 0, 150);
+            rect(0, 0, width, height);
+            
+            fill(255, 100, 100);
+            textAlign(CENTER);
+            textSize(32);
+            text("GAME OVER", width/2, height/2 - 20);
+            
+            fill(255);
+            textSize(18);
+            text("Press SPACE to restart", width/2, height/2 + 20);
+        }
+        
+        function keyPressed() {
+            if (keyCode === 32) { // Space bar
+                if (gameState === 'won') {
+                    roomNumber++;
+                    generateRoom();
+                } else if (gameState === 'dead') {
+                    roomNumber = 1;
+                    generateRoom();
+                }
+            }
+        }
+        
+        Player.prototype.collidesWith = function(obj) {
+            return this.x < obj.x + obj.w &&
+                   this.x + this.w > obj.x &&
+                   this.y < obj.y + obj.h &&
+                   this.y + this.h > obj.y;
+        };
+    </script>
+</body>
+</html>

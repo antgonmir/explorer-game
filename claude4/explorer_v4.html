@@ -669,21 +669,43 @@
                     ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
                 }
 
-                // Draw water holes
+                // Draw water holes with cave edges
                 for (let water of this.waterHoles) {
                     water.waveOffset += 0.1;
 
-                    // Water base
+                    // Edge lip - lighter brown to suggest the ground's rim
+                    ctx.fillStyle = '#000000';
+                    ctx.fillRect(water.x - 2, water.y - 2, water.width + 4, 4); // horizontal lip
+                    //ctx.fillRect(water.x - 2, water.y, 2, water.height);        // left inner wall
+                    //ctx.fillRect(water.x + water.width, water.y, 2, water.height); // right inner wall
+
+                    // Inner pit shadow - darker brown for depth
+                    ctx.fillStyle = '#3a2a1a';
+                    ctx.fillRect(water.x, water.y, water.width, water.height);
+
+                    // Water base (deep blue)
                     ctx.fillStyle = '#1e6091';
                     ctx.fillRect(water.x, water.y, water.width, water.height);
 
-                    // Animated water surface
+                    // Animated water surface (light shimmer)
                     ctx.fillStyle = '#2980b9';
                     for (let i = 0; i < water.width; i += 2) {
                         const waveHeight = Math.sin(water.waveOffset + i * 0.1) * 2;
                         ctx.fillRect(water.x + i, water.y + waveHeight, 2, 3);
                     }
+
+                    // Optional: reflection shimmer effect
+                    if (Math.random() < 0.02) {
+                        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                        ctx.fillRect(
+                            water.x + Math.random() * water.width,
+                            water.y + Math.random() * 5,
+                            4,
+                            1
+                        );
+                    }
                 }
+
 
                 // Draw torches
                 for (let torch of this.torches) {
