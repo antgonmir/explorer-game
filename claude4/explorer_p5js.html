@@ -144,6 +144,23 @@
                 push();
                 translate(0, -cameraY);
                 
+                // Double jump effect
+                if (this.doubleJumpEffectTimer && this.doubleJumpEffectTimer > 0) {
+                    this.doubleJumpEffectTimer--;
+                    
+                    // Draw sparkle particles around player
+                    for (let i = 0; i < 6; i++) {
+                        let angle = (i / 6) * TWO_PI;
+                        let distance = 15 + sin(frameCount * 0.3) * 5;
+                        let px = this.x + this.w/2 + cos(angle) * distance;
+                        let py = this.y + this.h/2 + sin(angle) * distance;
+                        
+                        fill(255, 255, 255, (this.doubleJumpEffectTimer / 10) * 255);
+                        noStroke();
+                        circle(px, py, 3);
+                    }
+                }
+                
                 // Player glow effect
                 drawingContext.shadowColor = hasKey ? '#FFD700' : '#64C8FF';
                 drawingContext.shadowBlur = 15;
@@ -159,6 +176,14 @@
                 fill(0);
                 circle(this.x + 6, this.y + 7, 2);
                 circle(this.x + 14, this.y + 7, 2);
+                
+                // Jump indicator - show remaining jumps
+                if (!this.grounded && this.jumpsLeft > 0) {
+                    fill(255, 255, 255, 150);
+                    textAlign(CENTER);
+                    textSize(10);
+                    text('★', this.x + this.w/2, this.y - 10);
+                }
                 
                 drawingContext.shadowBlur = 0;
                 pop();
@@ -294,6 +319,150 @@
             generateRoom();
         }
         
+        function isPositionSafe(x, y, w, h, safetyMargin) {
+            let testObject = {x: x, y: y, w: w, h: h};
+            
+            // Check collision with existing enemies
+            for (let enemy of enemies) {
+                if (objectsOverlap(testObject, enemy, safetyMargin)) {
+                    return false;
+                }
+            }
+            
+            // Check collision with spikes
+            for (let spike of spikes) {
+                if (objectsOverlap(testObject, spike, safetyMargin)) {
+                    return false;
+                }
+            }
+            
+            // Check if position has enough vertical clearance (no platform directly above)
+            for (let platform of platforms) {
+                if (x + w > platform.x && x < platform.x + platform.w) {
+                    // If there's a platform above within 60 pixels, it's not safe
+                    if (platform.y < y && platform.y > y - 60) {
+                        return false;
+                    }
+                }
+            }
+            
+            // Check if position has enough horizontal clearance (no walls too close)
+            let hasLeftClearance = true;
+            let hasRightClearance = true;
+            
+            for (let platform of platforms) {
+                // Check for walls or platforms that are too close horizontally
+                if (platform.y < y + h && platform.y + platform.h > y) {
+                    // Left side clearance
+                    if (platform.x + platform.w > x - safetyMargin && platform.x + platform.w < x + w/2) {
+                        hasLeftClearance = false;
+                    }
+                    // Right side clearance  
+                    if (platform.x < x + w + safetyMargin && platform.x > x + w/2) {
+                        hasRightClearance = false;
+                    }
+                }
+            }
+            
+            return hasLeftClearance && hasRightClearance;
+        }
+        
+        function objectsOverlap(obj1, obj2, margin = 0) {
+            return obj1.x - margin < obj2.x + obj2.w + margin &&
+                   obj1.x + obj1.w + margin > obj2.x - margin &&
+                   obj1.y - margin < obj2.y + obj2.h + margin &&
+                   obj1.y + obj1.h + margin > obj2.y - margin;
+        }
+        
+        function findSafeKeyPosition(reachablePlatforms) {
+            let maxAttempts = 50;
+            let attempts = 0;
+            
+            while (attempts < maxAttempts) {
+                // Choose a random reachable platform (avoid ground platform if possible)
+                let platformIndex = reachablePlatforms.length > 1 ? 
+                    floor(random(1, reachablePlatforms.length)) : 0;
+                let platform = reachablePlatforms[platformIndex];
+                
+                // Only consider platforms wide enough for safe key placement
+                if (platform.w < 50) {
+                    attempts++;
+                    continue;
+                }
+                
+                // Try random positions on this platform
+                let keyX = platform.x + random(25, platform.w - 40);
+                let keyY = platform.y - 25;
+                
+                if (isPositionSafe(keyX, keyY, 15, 15, 30)) {
+                    return {x: keyX, y: keyY};
+                }
+                
+                attempts++;
+            }
+            
+            // Fallback: find the widest platform and place key in the center
+            let widestPlatform = reachablePlatforms[0];
+            for (let platform of reachablePlatforms) {
+                if (platform.w > widestPlatform.w) {
+                    widestPlatform = platform;
+                }
+            }
+            
+            return {
+                x: widestPlatform.x + widestPlatform.w/2 - 7.5,
+                y: widestPlatform.y - 25
+            };
+        }
+        
+        function findSafeDoorPosition(reachablePlatforms, keyPosition) {
+            let maxAttempts = 50;
+            let attempts = 0;
+            
+            while (attempts < maxAttempts) {
+                // Choose a random reachable platform
+                let platformIndex = floor(random(0, reachablePlatforms.length));
+                let platform = reachablePlatforms[platformIndex];
+                
+                // Only consider platforms wide enough for door placement
+                if (platform.w < 60) {
+                    attempts++;
+                    continue;
+                }
+                
+                // Try to place door away from key
+                let doorX = platform.x + platform.w - 30;
+                let doorY = platform.y - 40;
+                
+                // Make sure door isn't too close to key
+                if (dist(doorX, doorY, keyPosition.x, keyPosition.y) > 80 && 
+                    isPositionSafe(doorX, doorY, 25, 40, 20)) {
+                    return {x: doorX, y: doorY};
+                }
+                
+                attempts++;
+            }
+            
+            // Fallback: find a platform far from key
+            let bestPlatform = reachablePlatforms[0];
+            let maxDistance = 0;
+            
+            for (let platform of reachablePlatforms) {
+                if (platform.w >= 60) {
+                    let distance = dist(platform.x, platform.y, keyPosition.x, keyPosition.y);
+                    if (distance > maxDistance) {
+                        maxDistance = distance;
+                        bestPlatform = platform;
+                    }
+                }
+            }
+            
+            return {
+                x: bestPlatform.x + bestPlatform.w - 30,
+                y: bestPlatform.y - 40
+            };
+        }
+        
         function generateRoom() {
             platforms = [];
             enemies = [];
@@ -310,32 +479,7 @@
             // Find reachable platforms from player position
             let reachablePlatforms = findReachablePlatforms();
             
-            // Place key on a reachable platform (not ground)
-            let keyPlatformIndex = floor(random(1, reachablePlatforms.length));
-            let keyPlatform = reachablePlatforms[keyPlatformIndex];
-            key = {
-                x: keyPlatform.x + random(10, keyPlatform.w - 30),
-                y: keyPlatform.y - 25,
-                w: 15,
-                h: 15,
-                collected: false,
-                angle: 0
-            };
-            
-            // Place door on a different reachable platform
-            let doorPlatformIndex = floor(random(1, reachablePlatforms.length));
-            while (doorPlatformIndex === keyPlatformIndex && reachablePlatforms.length > 2) {
-                doorPlatformIndex = floor(random(1, reachablePlatforms.length));
-            }
-            let doorPlatform = reachablePlatforms[doorPlatformIndex];
-            door = {
-                x: doorPlatform.x + doorPlatform.w - 30,
-                y: doorPlatform.y - 40,
-                w: 25,
-                h: 40
-            };
-            
-            // Create enemies on reachable platforms
+            // Create enemies on reachable platforms first (so we can avoid them for key placement)
             for (let i = 0; i < random(3, 6); i++) {
                 let enemyPlatformIndex = floor(random(0, reachablePlatforms.length));
                 let enemyPlatform = reachablePlatforms[enemyPlatformIndex];
@@ -349,7 +493,7 @@
                 }
             }
             
-            // Create spikes on some reachable platforms
+            // Create spikes on some reachable platforms first (so we can avoid them for key placement)
             for (let i = 0; i < random(2, 4); i++) {
                 let spikePlatformIndex = floor(random(0, reachablePlatforms.length));
                 let spikePlatform = reachablePlatforms[spikePlatformIndex];
@@ -362,6 +506,26 @@
                     ));
                 }
             }
+            
+            // Place key on a safe, reachable platform
+            let safeKeyPosition = findSafeKeyPosition(reachablePlatforms);
+            key = {
+                x: safeKeyPosition.x,
+                y: safeKeyPosition.y,
+                w: 15,
+                h: 15,
+                collected: false,
+                angle: 0
+            };
+            
+            // Place door on a different safe platform
+            let safeDoorPosition = findSafeDoorPosition(reachablePlatforms, safeKeyPosition);
+            door = {
+                x: safeDoorPosition.x,
+                y: safeDoorPosition.y,
+                w: 25,
+                h: 40
+            };
             
             cameraY = 0;
         }
@@ -623,18 +787,23 @@
             textAlign(LEFT);
             textSize(14);
             text("ARROW KEYS or WASD: Move & Jump", 10, 25);
-            text("Collect the KEY and reach the DOOR!", 10, 45);
-            text(`Room: ${roomNumber}`, 10, 65);
+            text("Double Jump available! Press jump twice!", 10, 45);
+            text("Collect the KEY and reach the DOOR!", 10, 65);
+            text(`Room: ${roomNumber}`, 10, 85);
             
             if (hasKey) {
                 fill(255, 215, 0);
-                text("KEY COLLECTED! Find the door!", 10, 85);
+                text("KEY COLLECTED! Find the door!", 10, 105);
             }
             
             // Health/lives indicator
             fill(255, 100, 100);
             textAlign(RIGHT);
             text("Avoid red enemies and spikes!", width - 10, 25);
+            
+            // Jump indicator in UI
+            fill(255, 255, 255, 180);
+            text(`Jumps: ${player.jumpsLeft}/2`, width - 10, 45);
         }
         
         function drawWinScreen() {
