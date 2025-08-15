@@ -41,9 +41,12 @@
                 this.grounded = false;
                 this.speed = 4;
                 this.jumpPower = -12;
+                this.doubleJumpPower = -10;
                 this.gravity = 0.6;
                 this.maxFallSpeed = 15;
                 this.color = hasKey ? color(255, 215, 0) : color(100, 200, 255);
+                this.jumpsLeft = 2; // Can jump twice
+                this.jumpPressed = false; // For jump buffering
             }
             
             update() {
@@ -56,11 +59,24 @@
                     this.vx *= 0.8; // friction
                 }
                 
-                // Jump
-                if ((keyIsDown(UP_ARROW) || keyIsDown(87) || keyIsDown(32)) && this.grounded) { // W or SPACE
-                    this.vy = this.jumpPower;
+                // Jump logic with double jump
+                let jumpInput = keyIsDown(UP_ARROW) || keyIsDown(87) || keyIsDown(32); // W or SPACE
+                
+                if (jumpInput && !this.jumpPressed && this.jumpsLeft > 0) {
+                    if (this.jumpsLeft === 2) {
+                        // First jump (from ground)
+                        this.vy = this.jumpPower;
+                    } else {
+                        // Double jump (in air)
+                        this.vy = this.doubleJumpPower;
+                        // Create double jump particle effect
+                        this.createDoubleJumpEffect();
+                    }
+                    this.jumpsLeft--;
                     this.grounded = false;
                 }
+                
+                this.jumpPressed = jumpInput; // Track jump button state
                 
                 // Apply gravity
                 this.vy += this.gravity;
@@ -79,6 +95,7 @@
                             this.y = platform.y - this.h;
                             this.vy = 0;
                             this.grounded = true;
+                            this.jumpsLeft = 2; // Reset jumps when landing
                         }
                         // Bottom collision (hitting ceiling)
                         else if (this.vy < 0 && this.y - this.vy >= platform.y + platform.h) {
@@ -108,6 +125,12 @@
                 
                 // Update color based on key status
                 this.color = hasKey ? color(255, 215, 0) : color(100, 200, 255);
+            }
+            
+            createDoubleJumpEffect() {
+                // Add some visual particles for double jump
+                // This creates a brief visual indicator
+                this.doubleJumpEffectTimer = 10;
             }
             
             collidesWith(obj) {
