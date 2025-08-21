@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Explorer Platformer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1a2a6c, #b21f1f, #fdbb2d);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+        
+        .container {
+            background-color: rgba(0, 0, 0, 0.7);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.6);
+            max-width: 900px;
+            text-align: center;
+        }
+        
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            text-shadow: 3px 3px 5px rgba(0, 0, 0, 0.5);
+            color: #FFD700;
+        }
+        
+        .instructions {
+            background-color: rgba(0, 0, 50, 0.6);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            text-align: left;
+            border-left: 4px solid #FFD700;
+        }
+        
+        canvas {
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .control-group {
+            background-color: rgba(0, 30, 60, 0.7);
+            padding: 10px 20px;
+            border-radius: 8px;
+            margin: 10px;
+            min-width: 200px;
+        }
+        
+        .key {
+            display: inline-block;
+            background: linear-gradient(to bottom, #444, #000);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            border: 1px solid #555;
+            box-shadow: 0 3px 0 #555;
+            margin: 5px;
+            font-weight: bold;
+        }
+        
+        .status {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 15px;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+        
+        .status-item {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 8px;
+        }
+        
+        .highlight {
+            color: #FFD700;
+        }
+        
+        .footer {
+            margin-top: 20px;
+            font-size: 0.9rem;
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Explorer Platformer</h1>
+        
+        <div class="instructions">
+            <p>You are an explorer! Find the <span class="highlight">key</span> to unlock the <span class="highlight">door</span> and escape each room.</p>
+            <p>Avoid hazards and enemies! Each room is randomly generated.</p>
+        </div>
+        
+        <div id="gameCanvas"></div>
+        
+        <div class="status">
+            <div class="status-item">Level: <span id="level">1</span></div>
+            <div class="status-item">Lives: <span id="lives">3</span></div>
+            <div class="status-item">Keys: <span id="keys">0</span></div>
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <h3>Movement</h3>
+                <p><span class="key">A</span> / <span class="key">←</span> Move Left</p>
+                <p><span class="key">D</span> / <span class="key">→</span> Move Right</p>
+                <p><span class="key">W</span> / <span class="key">↑</span> / <span class="key">SPACE</span> Jump</p>
+            </div>
+            
+            <div class="control-group">
+                <h3>Actions</h3>
+                <p><span class="key">R</span> Restart Level</p>
+                <p><span class="key">N</span> Next Level (Debug)</p>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>Collect the key and reach the door to advance to the next level!</p>
+        </div>
+    </div>
+
+    <script>
+        let player;
+        let platforms = [];
+        let hazards = [];
+        let enemies = [];
+        let key;
+        let door;
+        let level = 1;
+        let lives = 3;
+        let keysCollected = 0;
+        let gameWidth = 800;
+        let gameHeight = 500;
+        let playerSize = 30;
+        let isGameOver = false;
+        let isLevelComplete = false;
+
+        function setup() {
+            let canvas = createCanvas(gameWidth, gameHeight);
+            canvas.parent('gameCanvas');
+            resetLevel();
+        }
+
+        function draw() {
+            // Draw background
+            drawBackground();
+            
+            // Update and draw game elements
+            updateGame();
+            
+            // Draw UI
+            drawUI();
+        }
+
+        function resetLevel() {
+            // Clear previous level elements
+            platforms = [];
+            hazards = [];
+            enemies = [];
+            
+            // Create player if it doesn't exist
+            if (!player) {
+                player = {
+                    x: 50,
+                    y: gameHeight - 100,
+                    width: playerSize,
+                    height: playerSize,
+                    velocityX: 0,
+                    velocityY: 0,
+                    speed: 5,
+                    jumpForce: 12,
+                    isJumping: false,
+                    color: [30, 144, 255] // Dodger blue
+                };
+            } else {
+                // Reset player position
+                player.x = 50;
+                player.y = gameHeight - 100;
+                player.velocityX = 0;
+                player.velocityY = 0;
+                player.isJumping = false;
+            }
+            
+            // Generate platforms (ensuring they're reachable)
+            generatePlatforms();
+            
+            // Generate hazards
+            generateHazards();
+            
+            // Generate enemies
+            generateEnemies();
+            
+            // Place key on a random platform (not the first one)
+            let keyPlatform = platforms[floor(random(1, platforms.length))];
+            key = {
+                x: keyPlatform.x + keyPlatform.width/2 - 10,
+                y: keyPlatform.y - 20,
+                width: 20,
+                height: 10,
+                collected: false,
+                color: [255, 215, 0] // Gold
+            };
+            
+            // Place door on the far right side
+            let doorPlatform = platforms[platforms.length - 1];
+            door = {
+                x: doorPlatform.x + doorPlatform.width/2 - 20,
+                y: doorPlatform.y - 40,
+                width: 40,
+                height: 40,
+                color: [139, 69, 19] // Brown
+            };
+            
+            isLevelComplete = false;
+        }
+
+        function generatePlatforms() {
+            // Always create a starting platform
+            platforms.push({
+                x: 0,
+                y: gameHeight - 50,
+                width: 150,
+                height: 20,
+                color: [70, 130, 180] // Steel blue
+            });
+            
+            // Create a path of platforms across the screen
+            let lastPlatform = platforms[0];
+            let platformCount = 8 + level; // More platforms as levels increase
+            
+            for (let i = 0; i < platformCount; i++) {
+                let width = random(60, 120);
+                let height = 20;
+                let x = lastPlatform.x + lastPlatform.width + random(20, 100);
+                let y = random(gameHeight - 200, gameHeight - 50);
+                
+                // Ensure platforms don't go beyond screen boundaries
+                if (x + width > gameWidth - 50) {
+                    x = gameWidth - width - 50;
+                }
+                
+                platforms.push({
+                    x: x,
+                    y: y,
+                    width: width,
+                    height: height,
+                    color: [70, 130, 180] // Steel blue
+                });
+                
+                lastPlatform = platforms[platforms.length - 1];
+            }
+            
+            // Ensure the last platform is on the right side for the door
+            platforms[platforms.length - 1].x = gameWidth - 150;
+            platforms[platforms.length - 1].y = gameHeight - 100;
+        }
+
+        function generateHazards() {
+            let hazardCount = 2 + floor(level / 2); // More hazards as levels increase
+            
+            for (let i = 0; i < hazardCount; i++) {
+                // Place hazards on random platforms (not the first or last)
+                let platformIndex = floor(random(1, platforms.length - 1));
+                let platform = platforms[platformIndex];
+                
+                hazards.push({
+                    x: platform.x + random(10, platform.width - 30),
+                    y: platform.y + 5,
+                    width: 30,
+                    height: 15,
+                    color: [255, 0, 0] // Red
+                });
+            }
+        }
+
+        function generateEnemies() {
+            let enemyCount = 1 + floor(level / 2); // More enemies as levels increase
+            
+            for (let i = 0; i < enemyCount; i++) {
+                // Place enemies on random platforms (not the first or last)
+                let platformIndex = floor(random(1, platforms.length - 1));
+                let platform = platforms[platformIndex];
+                
+                enemies.push({
+                    x: platform.x + 10,
+                    y: platform.y - 20,
+                    width: 20,
+                    height: 20,
+                    speed: random(1, 3),
+                    direction: 1,
+                    color: [220, 20, 60] // Crimson
+                });
+            }
+        }
+
+        function updateGame() {
+            if (isGameOver) {
+                return;
+            }
+            
+            if (isLevelComplete) {
+                drawLevelComplete();
+                return;
+            }
+            
+            // Apply gravity
+            player.velocityY += 0.5;
+            
+            // Handle player input
+            handleInput();
+            
+            // Update player position
+            player.x += player.velocityX;
+            player.y += player.velocityY;
+            
+            // Check platform collisions
+            checkPlatformCollisions();
+            
+            // Update enemies
+            updateEnemies();
+            
+            // Check key collection
+            checkKeyCollection();
+            
+            // Check door collision
+            checkDoorCollision();
+            
+            // Check hazard collisions
+            checkHazardCollisions();
+            
+            // Check enemy collisions
+            checkEnemyCollisions();
+            
+            // Check boundaries
+            if (player.x < 0) player.x = 0;
+            if (player.x > gameWidth - player.width) player.x = gameWidth - player.width;
+            if (player.y > gameHeight) {
+                // Player fell off the screen
+                loseLife();
+            }
+            
+            // Draw game elements
+            drawGameElements();
+        }
+
+        function handleInput() {
+            // Horizontal movement
+            if (keyIsDown(65) || keyIsDown(LEFT_ARROW)) { // A or Left Arrow
+                player.velocityX = -player.speed;
+            } else if (keyIsDown(68) || keyIsDown(RIGHT_ARROW)) { // D or Right Arrow
+                player.velocityX = player.speed;
+            } else {
+                player.velocityX = 0;
+            }
+            
+            // Jumping
+            if ((keyIsDown(87) || keyIsDown(UP_ARROW) || keyIsDown(32)) && !player.isJumping) { // W, Up Arrow or Space
+                player.velocityY = -player.jumpForce;
+                player.isJumping = true;
+            }
+        }
+
+        function checkPlatformCollisions() {
+            player.isJumping = true; // Assume player is in the air unless proven otherwise
+            
+            for (let platform of platforms) {
+                // Check if player is on top of a platform
+                if (player.x + player.width > platform.x && 
+                    player.x < platform.x + platform.width &&
+                    player.y + player.height > platform.y &&
+                    player.y + player.height < platform.y + platform.height + player.velocityY &&
+                    player.velocityY > 0) {
+                    
+                    player.y = platform.y - player.height;
+                    player.velocityY = 0;
+                    player.isJumping = false;
+                }
+            }
+        }
+
+        function updateEnemies() {
+            for (let enemy of enemies) {
+                // Move enemy back and forth on their platform
+                enemy.x += enemy.speed * enemy.direction;
+                
+                // Find the platform the enemy is on
+                for (let platform of platforms) {
+                    if (enemy.x + enemy.width > platform.x && 
+                        enemy.x < platform.x + platform.width &&
+                        enemy.y + enemy.height > platform.y &&
+                        enemy.y < platform.y + platform.height) {
+                        
+                        // Reverse direction if reaching platform edge
+                        if (enemy.x <= platform.x || enemy.x + enemy.width >= platform.x + platform.width) {
+                            enemy.direction *= -1;
+                        }
+                    }
+                }
+            }
+        }
+
+        function checkKeyCollection() {
+            if (!key.collected && 
+                player.x + player.width > key.x &&
+                player.x < key.x + key.width &&
+                player.y + player.height > key.y &&
+                player.y < key.y + key.height) {
+                
+                key.collected = true;
+                keysCollected++;
+                document.getElementById('keys').textContent = keysCollected;
+            }
+        }
+
+        function checkDoorCollision() {
+            if (key.collected &&
+                player.x + player.width > door.x &&
+                player.x < door.x + door.width &&
+                player.y + player.height > door.y &&
+                player.y < door.y + door.height) {
+                
+                isLevelComplete = true;
+                setTimeout(() => {
+                    level++;
+                    document.getElementById('level').textContent = level;
+                    resetLevel();
+                }, 2000);
+            }
+        }
+
+        function checkHazardCollisions() {
+            for (let hazard of hazards) {
+                if (player.x + player.width > hazard.x &&
+                    player.x < hazard.x + hazard.width &&
+                    player.y + player.height > hazard.y &&
+                    player.y < hazard.y + hazard.height) {
+                    
+                    loseLife();
+                    break;
+                }
+            }
+        }
+
+        function checkEnemyCollisions() {
+            for (let enemy of enemies) {
+                if (player.x + player.width > enemy.x &&
+                    player.x < enemy.x + enemy.width &&
+                    player.y + player.height > enemy.y &&
+                    player.y < enemy.y + enemy.height) {
+                    
+                    loseLife();
+                    break;
+                }
+            }
+        }
+
+        function loseLife() {
+            lives--;
+            document.getElementById('lives').textContent = lives;
+            
+            if (lives <= 0) {
+                isGameOver = true;
+            } else {
+                // Reset player position
+                player.x = 50;
+                player.y = gameHeight - 100;
+                player.velocityX = 0;
+                player.velocityY = 0;
+            }
+        }
+
+        function drawBackground() {
+            // Draw gradient background
+            for (let i = 0; i < gameHeight; i++) {
+                let inter = map(i, 0, gameHeight, 0, 1);
+                let c = lerpColor(color(10, 10, 40), color(50, 50, 100), inter);
+                stroke(c);
+                line(0, i, gameWidth, i);
+            }
+            
+            // Draw some stars
+            stroke(255);
+            strokeWeight(2);
+            for (let i = 0; i < 50; i++) {
+                point(random(gameWidth), random(gameHeight/2));
+            }
+        }
+
+        function drawGameElements() {
+            // Draw platforms
+            for (let platform of platforms) {
+                fill(platform.color);
+                rect(platform.x, platform.y, platform.width, platform.height, 5);
+            }
+            
+            // Draw hazards
+            for (let hazard of hazards) {
+                fill(hazard.color);
+                // Draw spikes
+                triangle(
+                    hazard.x, hazard.y + hazard.height,
+                    hazard.x + hazard.width/2, hazard.y,
+                    hazard.x + hazard.width, hazard.y + hazard.height
+                );
+            }
+            
+            // Draw enemies
+            for (let enemy of enemies) {
+                fill(enemy.color);
+                rect(enemy.x, enemy.y, enemy.width, enemy.height, 5);
+                
+                // Draw eyes
+                fill(255);
+                ellipse(enemy.x + 5, enemy.y + 7, 5, 5);
+                ellipse(enemy.x + 15, enemy.y + 7, 5, 5);
+                fill(0);
+                ellipse(enemy.x + 5, enemy.y + 7, 2, 2);
+                ellipse(enemy.x + 15, enemy.y + 7, 2, 2);
+            }
+            
+            // Draw key if not collected
+            if (!key.collected) {
+                fill(key.color);
+                rect(key.x, key.y, key.width, key.height, 3);
+                // Draw key handle
+                rect(key.x + 5, key.y - 8, 10, 8, 2);
+            }
+            
+            // Draw door
+            fill(door.color);
+            rect(door.x, door.y, door.width, door.height);
+            // Draw door knob
+            fill(255, 215, 0);
+            ellipse(door.x + 30, door.y + 20, 5, 5);
+            
+            // Draw player
+            fill(player.color);
+            rect(player.x, player.y, player.width, player.height, 5);
+            
+            // Draw player eyes
+            fill(255);
+            ellipse(player.x + 8, player.y + 10, 8, 8);
+            ellipse(player.x + 22, player.y + 10, 8, 8);
+            fill(0);
+            ellipse(player.x + 8, player.y + 10, 4, 4);
+            ellipse(player.x + 22, player.y + 10, 4, 4);
+        }
+
+        function drawUI() {
+            // Draw key status
+            if (!key.collected) {
+                fill(255);
+                textSize(16);
+                text("Find the key!", 10, 25);
+            } else {
+                fill(255, 215, 0);
+                textSize(16);
+                text("Key collected! Now reach the door.", 10, 25);
+            }
+            
+            // Draw game over screen
+            if (isGameOver) {
+                fill(0, 0, 0, 200);
+                rect(0, 0, gameWidth, gameHeight);
+                
+                fill(255, 0, 0);
+                textSize(48);
+                textAlign(CENTER, CENTER);
+                text("GAME OVER", gameWidth/2, gameHeight/2 - 40);
+                
+                fill(255);
+                textSize(24);
+                text("Press 'R' to restart", gameWidth/2, gameHeight/2 + 20);
+                textAlign(LEFT);
+            }
+        }
+
+        function drawLevelComplete() {
+            fill(0, 0, 0, 200);
+            rect(0, 0, gameWidth, gameHeight);
+            
+            fill(0, 255, 0);
+            textSize(48);
+            textAlign(CENTER, CENTER);
+            text("LEVEL COMPLETE!", gameWidth/2, gameHeight/2);
+            textAlign(LEFT);
+        }
+
+        function keyPressed() {
+            // Restart game
+            if (keyCode === 82) { // R key
+                if (isGameOver) {
+                    isGameOver = false;
+                    lives = 3;
+                    level = 1;
+                    keysCollected = 0;
+                    document.getElementById('lives').textContent = lives;
+                    document.getElementById('level').textContent = level;
+                    document.getElementById('keys').textContent = keysCollected;
+                }
+                resetLevel();
+            }
+            
+            // Debug: Skip to next level
+            if (keyCode === 78) { // N key
+                level++;
+                document.getElementById('level').textContent = level;
+                resetLevel();
+            }
+            
+            return false; // Prevent default behavior
+        }
+    </script>
+</body>
+</html>
