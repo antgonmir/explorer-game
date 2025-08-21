@@ -400,15 +400,31 @@
         function checkCollisions() {
             if (gameState !== "playing") return;
             
-            // Player with platforms
+            // Player with platforms - FIXED COLLISION DETECTION
             player.onGround = false;
             for (let platform of platforms) {
                 if (player.collidesWith(platform)) {
-                    // Top collision
-                    if (player.y + player.h > platform.y && player.y + player.h < platform.y + 10 && player.vy > 0) {
-                        player.y = platform.y - player.h;
-                        player.vy = 0;
-                        player.onGround = true;
+                    // Calculate overlap on each axis
+                    let overlapX = min(player.x + player.w - platform.x, platform.x + platform.w - player.x);
+                    let overlapY = min(player.y + player.h - platform.y, platform.y + platform.h - player.y);
+                    
+                    // Resolve collision on the axis with least penetration
+                    if (overlapX < overlapY) {
+                        if (player.x < platform.x) {
+                            player.x = platform.x - player.w;
+                        } else {
+                            player.x = platform.x + platform.w;
+                        }
+                        player.vx = 0;
+                    } else {
+                        if (player.y < platform.y) {
+                            player.y = platform.y - player.h;
+                            player.vy = 0;
+                            player.onGround = true;
+                        } else {
+                            player.y = platform.y + platform.h;
+                            player.vy = 0;
+                        }
                     }
                 }
             }
