@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Explorer's Quest - 2D Platformer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1a2a6c, #b21f1f, #fdbb2d);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+        }
+        
+        .container {
+            text-align: center;
+            max-width: 900px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.6);
+        }
+        
+        h1 {
+            color: #ffcc00;
+            text-shadow: 0 0 10px rgba(255, 204, 0, 0.5);
+            margin-bottom: 10px;
+            font-size: 2.5rem;
+        }
+        
+        .instructions {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            color: white;
+            text-align: left;
+        }
+        
+        .instructions h2 {
+            color: #4CAF50;
+            margin-top: 0;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: space-around;
+            margin: 15px 0;
+            flex-wrap: wrap;
+        }
+        
+        .control-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px;
+            border-radius: 8px;
+            margin: 5px;
+            min-width: 120px;
+        }
+        
+        .key {
+            display: inline-block;
+            background: #333;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            margin: 0 5px;
+            font-weight: bold;
+        }
+        
+        #gameCanvas {
+            border: 3px solid #4CAF50;
+            border-radius: 10px;
+            margin: 10px auto;
+            display: block;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+        
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            color: white;
+            font-size: 1.2rem;
+            margin: 15px 0;
+        }
+        
+        .stat {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 8px;
+            min-width: 120px;
+        }
+        
+        .highlight {
+            color: #ffcc00;
+            font-weight: bold;
+        }
+        
+        .restart-btn {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 10px;
+        }
+        
+        .restart-btn:hover {
+            background: #3e8e41;
+            transform: scale(1.05);
+        }
+        
+        .game-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            color: white;
+            display: none;
+        }
+        
+        .win {
+            border: 3px solid #4CAF50;
+        }
+        
+        .lose {
+            border: 3px solid #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Explorer's Quest</h1>
+        
+        <div class="instructions">
+            <h2>Objective</h2>
+            <p>Navigate through the randomly generated room, collect the key, avoid hazards and enemies, and reach the exit door!</p>
+        </div>
+        
+        <div class="controls">
+            <div class="control-item">
+                <span class="key">←</span> Move Left
+            </div>
+            <div class="control-item">
+                <span class="key">→</span> Move Right
+            </div>
+            <div class="control-item">
+                <span class="key">SPACE</span> Jump
+            </div>
+            <div class="control-item">
+                <span class="key">R</span> Restart
+            </div>
+        </div>
+        
+        <div id="gameCanvas"></div>
+        
+        <div class="stats">
+            <div class="stat">Level: <span class="highlight" id="level">1</span></div>
+            <div class="stat">Keys: <span class="highlight" id="keys">0</span></div>
+            <div class="stat">Lives: <span class="highlight" id="lives">3</span></div>
+        </div>
+        
+        <button class="restart-btn" onclick="initGame()">Restart Game</button>
+    </div>
+    
+    <div id="winMessage" class="game-message win">
+        <h2>Level Complete!</h2>
+        <p>You found the key and reached the door!</p>
+        <button class="restart-btn" onclick="nextLevel()">Next Level</button>
+    </div>
+    
+    <div id="gameOverMessage" class="game-message lose">
+        <h2>Game Over</h2>
+        <p>You ran out of lives!</p>
+        <button class="restart-btn" onclick="initGame()">Try Again</button>
+    </div>
+
+    <script>
+        let player;
+        let platforms = [];
+        let enemies = [];
+        let hazards = [];
+        let key;
+        let door;
+        let levelWidth = 800;
+        let levelHeight = 600;
+        let currentLevel = 1;
+        let score = 0;
+        let lives = 3;
+        let hasKey = false;
+        let gameState = "playing"; // playing, win, gameOver
+
+        function setup() {
+            let canvas = createCanvas(800, 600);
+            canvas.parent('gameCanvas');
+            initGame();
+        }
+
+        function draw() {
+            background(135, 206, 235); // Sky blue
+            
+            // Draw platforms
+            for (let platform of platforms) {
+                drawPlatform(platform);
+            }
+            
+            // Draw hazards
+            for (let hazard of hazards) {
+                drawHazard(hazard);
+            }
+            
+            // Draw key
+            if (key && !hasKey) {
+                drawKey(key);
+            }
+            
+            // Draw door
+            if (door) {
+                drawDoor(door);
+            }
+            
+            // Draw enemies
+            for (let enemy of enemies) {
+                drawEnemy(enemy);
+                enemy.move();
+            }
+            
+            // Draw player
+            drawPlayer(player);
+            player.move();
+            player.applyGravity();
+            
+            // Check collisions
+            checkCollisions();
+            
+            // Draw UI
+            drawUI();
+            
+            // Update HTML elements
+            document.getElementById('level').textContent = currentLevel;
+            document.getElementById('keys').textContent = hasKey ? '1' : '0';
+            document.getElementById('lives').textContent = lives;
+            
+            // Handle game states
+            if (gameState === "win") {
+                document.getElementById('winMessage').style.display = 'block';
+            } else if (gameState === "gameOver") {
+                document.getElementById('gameOverMessage').style.display = 'block';
+            }
+        }
+
+        function initGame() {
+            // Hide messages
+            document.getElementById('winMessage').style.display = 'none';
+            document.getElementById('gameOverMessage').style.display = 'none';
+            
+            // Reset game state
+            gameState = "playing";
+            lives = 3;
+            currentLevel = 1;
+            score = 0;
+            hasKey = false;
+            
+            generateLevel();
+        }
+
+        function nextLevel() {
+            // Hide win message
+            document.getElementById('winMessage').style.display = 'none';
+            
+            // Increase level
+            currentLevel++;
+            hasKey = false;
+            gameState = "playing";
+            
+            generateLevel();
+        }
+
+        function generateLevel() {
+            // Reset everything
+            platforms = [];
+            enemies = [];
+            hazards = [];
+            key = null;
+            door = null;
+            
+            // Create player
+            player = new Player(50, 50, 30, 40);
+            
+            // Create ground platform
+            platforms.push(new Platform(0, height - 40, levelWidth, 40));
+            
+            // Generate random platforms
+            let numPlatforms = 10 + currentLevel * 2;
+            for (let i = 0; i < numPlatforms; i++) {
+                let platformWidth = random(80, 150);
+                let platformHeight = 20;
+                let platformX = random(50, levelWidth - platformWidth - 50);
+                let platformY = random(100, levelHeight - 100);
+                
+                // Ensure platforms aren't too close vertically
+                let validPosition = true;
+                for (let platform of platforms) {
+                    if (abs(platformY - platform.y) < 60 && 
+                        platformX < platform.x + platform.w && 
+                        platformX + platformWidth > platform.x) {
+                        validPosition = false;
+                        break;
+                    }
+                }
+                
+                if (validPosition) {
+                    platforms.push(new Platform(platformX, platformY, platformWidth, platformHeight));
+                }
+            }
+            
+            // Generate key (ensure it's on a platform)
+            let keyPlatform = random(platforms);
+            while (keyPlatform.y === height - 40) { // Don't put key on ground
+                keyPlatform = random(platforms);
+            }
+            key = {
+                x: keyPlatform.x + keyPlatform.w/2 - 10,
+                y: keyPlatform.y - 20,
+                w: 20,
+                h: 10
+            };
+            
+            // Generate door (on a different platform than key)
+            let doorPlatform;
+            do {
+                doorPlatform = random(platforms);
+            } while (doorPlatform === keyPlatform || doorPlatform.y === height - 40);
+            
+            door = {
+                x: doorPlatform.x + doorPlatform.w/2 - 20,
+                y: doorPlatform.y - 60,
+                w: 40,
+                h: 60
+            };
+            
+            // Generate enemies (fewer on early levels)
+            let numEnemies = currentLevel;
+            for (let i = 0; i < numEnemies; i++) {
+                let enemyPlatform = random(platforms);
+                while (enemyPlatform === keyPlatform || enemyPlatform === doorPlatform) {
+                    enemyPlatform = random(platforms);
+                }
+                
+                enemies.push(new Enemy(
+                    enemyPlatform.x + random(20, enemyPlatform.w - 50),
+                    enemyPlatform.y - 30,
+                    30,
+                    30,
+                    enemyPlatform.x,
+                    enemyPlatform.x + enemyPlatform.w
+                ));
+            }
+            
+            // Generate hazards (more on higher levels)
+            let numHazards = floor(currentLevel / 2);
+            for (let i = 0; i < numHazards; i++) {
+                let hazardPlatform = random(platforms);
+                hazards.push(new Hazard(
+                    hazardPlatform.x + random(10, hazardPlatform.w - 40),
+                    hazardPlatform.y - 10,
+                    30,
+                    10
+                ));
+            }
+            
+            // Add some floating platforms to help with navigation
+            for (let i = 0; i < currentLevel; i++) {
+                let startPlatform = random(platforms);
+                let endPlatform = random(platforms);
+                
+                if (startPlatform !== endPlatform) {
+                    let midX = (startPlatform.x + endPlatform.x) / 2;
+                    let midY = (startPlatform.y + endPlatform.y) / 2 - random(50, 100);
+                    
+                    if (midY > 100 && midY < levelHeight - 100) {
+                        platforms.push(new Platform(midX - 50, midY, 100, 20));
+                    }
+                }
+            }
+        }
+
+        function checkCollisions() {
+            if (gameState !== "playing") return;
+            
+            // Player with platforms
+            player.onGround = false;
+            for (let platform of platforms) {
+                if (player.collidesWith(platform)) {
+                    // Top collision
+                    if (player.y + player.h > platform.y && player.y + player.h < platform.y + 10 && player.vy > 0) {
+                        player.y = platform.y - player.h;
+                        player.vy = 0;
+                        player.onGround = true;
+                    }
+                }
+            }
+            
+            // Player with key
+            if (key && player.collidesWith(key)) {
+                key = null;
+                hasKey = true;
+                score += 50;
+            }
+            
+            // Player with door
+            if (door && player.collidesWith(door)) {
+                if (hasKey) { // Only if player has collected the key
+                    score += 100 * currentLevel;
+                    gameState = "win";
+                }
+            }
+            
+            // Player with hazards
+            for (let hazard of hazards) {
+                if (player.collidesWith(hazard)) {
+                    playerDie();
+                }
+            }
+            
+            // Player with enemies
+            for (let enemy of enemies) {
+                if (player.collidesWith(enemy)) {
+                    // If player is above enemy, defeat it
+                    if (player.y + player.h < enemy.y + enemy.h / 2 && player.vy > 0) {
+                        enemies.splice(enemies.indexOf(enemy), 1);
+                        player.vy = -10; // Bounce
+                        score += 25;
+                    } else {
+                        playerDie();
+                    }
+                }
+            }
+            
+            // Fall off the world
+            if (player.y > height) {
+                playerDie();
+            }
+        }
+
+        function playerDie() {
+            lives--;
+            if (lives <= 0) {
+                gameState = "gameOver";
+            } else {
+                // Reset player position
+                player.x = 50;
+                player.y = 50;
+                player.vx = 0;
+                player.vy = 0;
+            }
+        }
+
+        function drawUI() {
+            // Draw score
+            fill(0);
+            textSize(20);
+            text(`Score: ${score}`, 20, 30);
+            
+            // Draw key status
+            if (hasKey) {
+                fill(255, 215, 0);
+                text("Key Collected!", width - 150, 30);
+            }
+        }
+
+        function drawPlayer(p) {
+            fill(50, 150, 200);
+            triangle(p.x + p.w/2, p.y, p.x, p.y + p.h, p.x + p.w, p.y + p.h);
+        }
+
+        function drawPlatform(platform) {
+            fill(100, 200, 100);
+            rect(platform.x, platform.y, platform.w, platform.h);
+        }
+
+        function drawEnemy(enemy) {
+            fill(200, 50, 50);
+            ellipse(enemy.x + enemy.w/2, enemy.y + enemy.h/2, enemy.w, enemy.h);
+        }
+
+        function drawKey(key) {
+            fill(255, 215, 0); // Gold
+            rect(key.x, key.y, 15, 5);
+            ellipse(key.x + 17, key.y + 5, 8, 8);
+        }
+
+        function drawDoor(door) {
+            fill(120, 80, 40); // Brown
+            rect(door.x, door.y, door.w, door.h);
+            fill(255, 215, 0); // Gold doorknob
+            ellipse(door.x + 30, door.y + 30, 10, 10);
+        }
+
+        function drawHazard(hazard) {
+            fill(255, 0, 0);
+            triangle(hazard.x, hazard.y + hazard.h, hazard.x + hazard.w/2, hazard.y, hazard.x + hazard.w, hazard.y + hazard.h);
+        }
+
+        function keyPressed() {
+            if (keyCode === 32) { // Spacebar
+                player.jump();
+            }
+            
+            if (keyCode === 82) { // R key
+                initGame();
+            }
+            
+            return false;
+        }
+
+        // Player class
+        class Player {
+            constructor(x, y, w, h) {
+                this.x = x;
+                this.y = y;
+                this.w = w;
+                this.h = h;
+                this.vx = 0;
+                this.vy = 0;
+                this.speed = 5;
+                this.jumpForce = 12;
+                this.onGround = false;
+            }
+            
+            move() {
+                // Horizontal movement
+                if (keyIsDown(LEFT_ARROW)) {
+                    this.vx = -this.speed;
+                } else if (keyIsDown(RIGHT_ARROW)) {
+                    this.vx = this.speed;
+                } else {
+                    this.vx = 0;
+                }
+                
+                this.x += this.vx;
+                
+                // Constrain to level boundaries
+                this.x = constrain(this.x, 0, levelWidth - this.w);
+            }
+            
+            jump() {
+                if (this.onGround) {
+                    this.vy = -this.jumpForce;
+                    this.onGround = false;
+                }
+            }
+            
+            applyGravity() {
+                this.vy += 0.5; // Gravity
+                this.y += this.vy;
+            }
+            
+            collidesWith(obj) {
+                return this.x < obj.x + obj.w &&
+                       this.x + this.w > obj.x &&
+                       this.y < obj.y + obj.h &&
+                       this.y + this.h > obj.y;
+            }
+        }
+
+        // Platform class
+        class Platform {
+            constructor(x, y, w, h) {
+                this.x = x;
+                this.y = y;
+                this.w = w;
+                this.h = h;
+            }
+        }
+
+        // Enemy class
+        class Enemy {
+            constructor(x, y, w, h, leftBound, rightBound) {
+                this.x = x;
+                this.y = y;
+                this.w = w;
+                this.h = h;
+                this.vx = 2;
+                this.leftBound = leftBound;
+                this.rightBound = rightBound;
+            }
+            
+            move() {
+                this.x += this.vx;
+                
+                // Change direction at boundaries
+                if (this.x <= this.leftBound || this.x + this.w >= this.rightBound) {
+                    this.vx *= -1;
+                }
+            }
+        }
+
+        // Hazard class
+        class Hazard {
+            constructor(x, y, w, h) {
+                this.x = x;
+                this.y = y;
+                this.w = w;
+                this.h = h;
+            }
+        }
+    </script>
+</body>
+</html>
