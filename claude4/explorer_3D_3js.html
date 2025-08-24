@@ -83,7 +83,8 @@
         <div id="instructions">
             WASD - Move<br>
             Space - Jump<br>
-            Double Space - Double Jump
+            Double Space - Double Jump<br>
+            ← → - Rotate Camera
         </div>
         
         <div id="gameOver">
@@ -103,6 +104,7 @@
         let gameState = 'playing'; // 'playing', 'gameOver', 'victory'
         let currentLevel = 1, playerHealth = 3;
         let exit = null;
+        let cameraAngle = 0; // Camera rotation angle around player
         
         // Game settings
         const VOXEL_SIZE = 1;
@@ -369,12 +371,32 @@
         function updatePlayer() {
             if (gameState !== 'playing') return;
             
-            // Horizontal movement
+            // Camera rotation with arrow keys
+            if (keys['ArrowLeft']) {
+                cameraAngle += 0.03;
+            }
+            if (keys['ArrowRight']) {
+                cameraAngle -= 0.03;
+            }
+            
+            // Calculate movement direction based on camera angle
+            const moveForward = new THREE.Vector3(0, 0, -PLAYER_SPEED);
+            const moveRight = new THREE.Vector3(PLAYER_SPEED, 0, 0);
+            const moveBackward = new THREE.Vector3(0, 0, PLAYER_SPEED);
+            const moveLeft = new THREE.Vector3(-PLAYER_SPEED, 0, 0);
+            
+            // Rotate movement vectors based on camera angle
+            moveForward.applyAxisAngle(new THREE.Vector3(0, 1, 0), cameraAngle);
+            moveRight.applyAxisAngle(new THREE.Vector3(0, 1, 0), cameraAngle);
+            moveBackward.applyAxisAngle(new THREE.Vector3(0, 1, 0), cameraAngle);
+            moveLeft.applyAxisAngle(new THREE.Vector3(0, 1, 0), cameraAngle);
+            
+            // Horizontal movement (relative to camera)
             const moveVector = new THREE.Vector3();
-            if (keys['w'] || keys['W']) moveVector.z -= PLAYER_SPEED;
-            if (keys['s'] || keys['S']) moveVector.z += PLAYER_SPEED;
-            if (keys['a'] || keys['A']) moveVector.x -= PLAYER_SPEED;
-            if (keys['d'] || keys['D']) moveVector.x += PLAYER_SPEED;
+            if (keys['w'] || keys['W']) moveVector.add(moveForward);
+            if (keys['s'] || keys['S']) moveVector.add(moveBackward);
+            if (keys['a'] || keys['A']) moveVector.add(moveLeft);
+            if (keys['d'] || keys['D']) moveVector.add(moveRight);
             
             // Apply movement
             player.position.add(moveVector);
@@ -509,8 +531,9 @@
         }
         
         function updateCamera() {
-            const targetX = player.position.x;
-            const targetZ = player.position.z + CAMERA_DISTANCE;
+            // Calculate camera position based on angle around player
+            const targetX = player.position.x + CAMERA_DISTANCE * Math.sin(cameraAngle);
+            const targetZ = player.position.z + CAMERA_DISTANCE * Math.cos(cameraAngle);
             const targetY = player.position.y + CAMERA_HEIGHT;
             
             camera.position.lerp(new THREE.Vector3(targetX, targetY, targetZ), 0.1);
@@ -578,10 +601,18 @@
         // Event listeners
         document.addEventListener('keydown', (e) => {
             keys[e.key] = true;
+            // Prevent default arrow key behavior
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                e.preventDefault();
+            }
         });
         
         document.addEventListener('keyup', (e) => {
             keys[e.key] = false;
+            // Prevent default arrow key behavior
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                e.preventDefault();
+            }
         });
         
         window.addEventListener('resize', () => {
