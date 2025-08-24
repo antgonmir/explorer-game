@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voxel Adventure</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: linear-gradient(135deg, #87CEEB, #98FB98);
+            font-family: 'Comic Sans MS', cursive, sans-serif;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            z-index: 100;
+        }
+        
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+            font-size: 24px;
+            background: rgba(0,0,0,0.8);
+            padding: 30px;
+            border-radius: 15px;
+            display: none;
+            z-index: 200;
+        }
+        
+        #instructions {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: white;
+            font-size: 14px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            text-align: right;
+            z-index: 100;
+        }
+        
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 10px;
+            font-family: inherit;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="ui">
+            <div>Level: <span id="level">1</span></div>
+            <div>Health: <span id="health">❤️❤️❤️</span></div>
+        </div>
+        
+        <div id="instructions">
+            WASD - Move<br>
+            Space - Jump<br>
+            Double Space - Double Jump
+        </div>
+        
+        <div id="gameOver">
+            <h2 id="gameOverTitle">Game Over!</h2>
+            <p id="gameOverText">You fell into the void!</p>
+            <button onclick="restartGame()">Try Again</button>
+            <button onclick="nextLevel()" id="nextBtn" style="display:none;">Next Level</button>
+        </div>
+    </div>
+
+    <script>
+        // Game variables
+        let scene, camera, renderer, world;
+        let player, platforms = [], enemies = [], collectibles = [];
+        let keys = {}, playerVelocity = new THREE.Vector3();
+        let isGrounded = false, canDoubleJump = true;
+        let gameState = 'playing'; // 'playing', 'gameOver', 'victory'
+        let currentLevel = 1, playerHealth = 3;
+        let exit = null;
+        
+        // Game settings
+        const VOXEL_SIZE = 1;
+        const WORLD_SIZE = 20;
+        const PLATFORM_HEIGHT = 0.5;
+        const PLAYER_SPEED = 0.15;
+        const JUMP_FORCE = 0.25;
+        const GRAVITY = -0.01;
+        const CAMERA_DISTANCE = 8;
+        const CAMERA_HEIGHT = 5;
+        
+        class VoxelWorld {
+            constructor() {
+                this.platforms = [];
+                this.enemies = [];
+                this.exit = null;
+                this.generateLevel();
+            }
+            
+            generateLevel() {
+                // Clear existing platforms
+                platforms.forEach(p => scene.remove(p));
+                enemies.forEach(e => scene.remove(e.mesh));
+                if (exit) scene.remove(exit);
+                
+                platforms = [];
+                enemies = [];
+                
+                // Generate platforms using cellular automata-like approach
+                const platformMap = this.generatePlatformMap();
+                this.createPlatforms(platformMap);
+                this.createEnemies();
+                this.createExit();
+            }
+            
+            generatePlatformMap() {
+                const map = [];
+                
+                // Initialize empty map
+                for (let x = 0; x < WORLD_SIZE; x++) {
+                    map[x] = [];
+                    for (let z = 0; z < WORLD_SIZE; z++) {
+                        map[x][z] = -1; // No platform by default
+                    }
+                }
+                
+                // Generate larger platform clusters
+                const numPlatforms = 8 + currentLevel * 2; // More platforms per level
+                const platforms = [];
+                
+                for (let i = 0; i < numPlatforms; i++) {
+                    const centerX = Math.floor(Math.random() * (WORLD_SIZE - 6)) + 3;
+                    const centerZ = Math.floor(Math.random() * (WORLD_SIZE - 6)) + 3;
+                    const height = Math.floor(Math.random() * 4);
+                    const size = 2 + Math.floor(Math.random() * 3); // Platform size 2x2 to 4x4
+                    
+                    platforms.push({ x: centerX, z: centerZ, height: height, size: size });
+                    
+                    // Create the platform cluster
+                    for (let dx = -Math.floor(size/2); dx <= Math.floor(size/2); dx++) {
+                        for (let dz = -Math.floor(size/2); dz <= Math.floor(size/2); dz++) {
+                            const x = centerX + dx;
+                            const z = centerZ + dz;
+                            if (x >= 0 && x < WORLD_SIZE && z >= 0 && z < WORLD_SIZE) {
+                                // Add some variation to platform height within cluster
+                                const heightVariation = Math.floor(Math.random() * 2);
+                                map[x][z] = height + heightVariation;
+                            }
+                        }
+                    }
+                }
+                
+                // Ensure start platform (bigger starting area)
+                for (let x = 0; x < 3; x++) {
+                    for (let z = 0; z < 3; z++) {
+                        map[x][z] = 1;
+                    }
+                }
+                
+                // Ensure end platform (bigger ending area)
+                for (let x = WORLD_SIZE-3; x < WORLD_SIZE; x++) {
+                    for (let z = WORLD_SIZE-3; z < WORLD_SIZE; z++) {
+                        map[x][z] = 1;
+                    }
+                }
+                
+                // Create connecting bridges between some platforms
+                this.createBridges(map, platforms);
+                
+                return map;
+            }
+            
+            createBridges(map, platforms) {
+                // Create bridges between nearby platforms for better connectivity
+                for (let i = 0; i < platforms.length - 1; i++) {
+                    for (let j = i + 1; j < platforms.length; j++) {
+                        const p1 = platforms[i];
+                        const p2 = platforms[j];
+                        const distance = Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.z - p2.z, 2));
+                        
+                        // If platforms are reasonably close, create a bridge
+                        if (distance > 3 && distance < 8 && Math.random() < 0.4) {
+                            this.createBridge(map, p1, p2);
+                        }
+                    }
+                }
+            }
+            
+            createBridge(map, p1, p2) {
+                // Simple linear interpolation bridge
+                const steps = Math.max(Math.abs(p1.x - p2.x), Math.abs(p1.z - p2.z));
+                
+                for (let step = 0; step <= steps; step++) {
+                    const t = step / steps;
+                    const x = Math.round(p1.x + (p2.x - p1.x) * t);
+                    const z = Math.round(p1.z + (p2.z - p1.z) * t);
+                    const height = Math.round(p1.height + (p2.height - p1.height) * t);
+                    
+                    if (x >= 0 && x < WORLD_SIZE && z >= 0 && z < WORLD_SIZE) {
+                        if (map[x][z] === -1) { // Only place bridge where there's no platform
+                            map[x][z] = height;
+                        }
+                    }
+                }
+            }
+            
+            createPlatforms(platformMap) {
+                for (let x = 0; x < WORLD_SIZE; x++) {
+                    for (let z = 0; z < WORLD_SIZE; z++) {
+                        if (platformMap[x][z] >= 0) {
+                            const height = platformMap[x][z];
+                            this.createVoxelPlatform(x - WORLD_SIZE/2, height, z - WORLD_SIZE/2);
+                        }
+                    }
+                }
+            }
+            
+            createVoxelPlatform(x, y, z) {
+                const geometry = new THREE.BoxGeometry(VOXEL_SIZE, PLATFORM_HEIGHT, VOXEL_SIZE);
+                const material = new THREE.MeshLambertMaterial({
+                    color: new THREE.Color().setHSL(0.3 + Math.random() * 0.3, 0.7, 0.6)
+                });
+                
+                const platform = new THREE.Mesh(geometry, material);
+                platform.position.set(x * VOXEL_SIZE, y, z * VOXEL_SIZE);
+                platform.userData.isPlatform = true;
+                
+                scene.add(platform);
+                platforms.push(platform);
+            }
+            
+            createEnemies() {
+                const enemyCount = Math.min(3 + currentLevel, 8);
+                for (let i = 0; i < enemyCount; i++) {
+                    if (platforms.length > 10) {
+                        const randomPlatform = platforms[Math.floor(Math.random() * platforms.length)];
+                        const enemy = this.createEnemy(randomPlatform.position);
+                        enemies.push(enemy);
+                    }
+                }
+            }
+            
+            createEnemy(position) {
+                const geometry = new THREE.SphereGeometry(0.3);
+                const material = new THREE.MeshLambertMaterial({ color: 0xff4444 });
+                const mesh = new THREE.Mesh(geometry, material);
+                
+                mesh.position.copy(position);
+                mesh.position.y += 0.5;
+                
+                scene.add(mesh);
+                
+                return {
+                    mesh: mesh,
+                    direction: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize(),
+                    speed: 0.02 + Math.random() * 0.03,
+                    bounceTimer: 0
+                };
+            }
+            
+            createExit() {
+                const geometry = new THREE.CylinderGeometry(0.8, 0.8, 2);
+                const material = new THREE.MeshLambertMaterial({ 
+                    color: 0x00ff00,
+                    emissive: 0x004400
+                });
+                
+                exit = new THREE.Mesh(geometry, material);
+                exit.position.set((WORLD_SIZE/2 - 1) * VOXEL_SIZE, 2, (WORLD_SIZE/2 - 1) * VOXEL_SIZE);
+                exit.userData.isExit = true;
+                
+                scene.add(exit);
+            }
+        }
+        
+        // Simple noise function
+        Math.noise2D = function(x, y) {
+            const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+            return (n - Math.floor(n)) * 2 - 1;
+        };
+        
+        function initGame() {
+            // Create scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb);
+            scene.fog = new THREE.Fog(0x87ceeb, 10, 50);
+            
+            // Create camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            // Create renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.getElementById('gameContainer').appendChild(renderer.domElement);
+            
+            // Add lights
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 20, 5);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+            
+            // Create player
+            createPlayer();
+            
+            // Create world
+            world = new VoxelWorld();
+            
+            // Add water/void plane
+            createWater();
+            
+            // Start game loop
+            animate();
+        }
+        
+        function createPlayer() {
+            const geometry = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+            const material = new THREE.MeshLambertMaterial({ color: 0x4169e1 });
+            player = new THREE.Mesh(geometry, material);
+            player.position.set(-WORLD_SIZE/2 * VOXEL_SIZE, 5, -WORLD_SIZE/2 * VOXEL_SIZE);
+            player.castShadow = true;
+            scene.add(player);
+        }
+        
+        function createWater() {
+            const waterGeometry = new THREE.PlaneGeometry(WORLD_SIZE * 3, WORLD_SIZE * 3);
+            const waterMaterial = new THREE.MeshLambertMaterial({ 
+                color: 0x0077be, 
+                transparent: true, 
+                opacity: 0.7 
+            });
+            const water = new THREE.Mesh(waterGeometry, waterMaterial);
+            water.rotation.x = -Math.PI / 2;
+            water.position.y = -5;
+            scene.add(water);
+        }
+        
+        function updatePlayer() {
+            if (gameState !== 'playing') return;
+            
+            // Horizontal movement
+            const moveVector = new THREE.Vector3();
+            if (keys['w'] || keys['W']) moveVector.z -= PLAYER_SPEED;
+            if (keys['s'] || keys['S']) moveVector.z += PLAYER_SPEED;
+            if (keys['a'] || keys['A']) moveVector.x -= PLAYER_SPEED;
+            if (keys['d'] || keys['D']) moveVector.x += PLAYER_SPEED;
+            
+            // Apply movement
+            player.position.add(moveVector);
+            
+            // Jumping
+            if (keys[' ']) {
+                if (isGrounded) {
+                    playerVelocity.y = JUMP_FORCE;
+                    isGrounded = false;
+                    canDoubleJump = true;
+                } else if (canDoubleJump) {
+                    playerVelocity.y = JUMP_FORCE;
+                    canDoubleJump = false;
+                }
+                keys[' '] = false; // Prevent holding space
+            }
+            
+            // Apply gravity
+            playerVelocity.y += GRAVITY;
+            player.position.y += playerVelocity.y;
+            
+            // Collision detection
+            checkPlatformCollisions();
+            checkEnemyCollisions();
+            checkExitCollision();
+            
+            // Check if player fell
+            if (player.position.y < -2) {
+                playerHealth--;
+                if (playerHealth <= 0) {
+                    gameOver('You fell into the void!');
+                } else {
+                    // Respawn
+                    player.position.set(-WORLD_SIZE/2 * VOXEL_SIZE, 5, -WORLD_SIZE/2 * VOXEL_SIZE);
+                    playerVelocity.set(0, 0, 0);
+                    updateUI();
+                }
+            }
+        }
+        
+        function checkPlatformCollisions() {
+            isGrounded = false;
+            const playerBox = new THREE.Box3().setFromObject(player);
+            
+            platforms.forEach(platform => {
+                const platformBox = new THREE.Box3().setFromObject(platform);
+                
+                if (playerBox.intersectsBox(platformBox)) {
+                    // Landing on top of platform
+                    if (playerVelocity.y < 0 && player.position.y > platform.position.y + 0.25) {
+                        player.position.y = platform.position.y + PLATFORM_HEIGHT/2 + 0.4;
+                        playerVelocity.y = 0;
+                        isGrounded = true;
+                        canDoubleJump = true;
+                    }
+                    // Side collision
+                    else if (Math.abs(player.position.y - platform.position.y) < 0.5) {
+                        const dx = player.position.x - platform.position.x;
+                        const dz = player.position.z - platform.position.z;
+                        
+                        if (Math.abs(dx) > Math.abs(dz)) {
+                            player.position.x = platform.position.x + Math.sign(dx) * (VOXEL_SIZE/2 + 0.4);
+                        } else {
+                            player.position.z = platform.position.z + Math.sign(dz) * (VOXEL_SIZE/2 + 0.4);
+                        }
+                    }
+                }
+            });
+        }
+        
+        function checkEnemyCollisions() {
+            const playerBox = new THREE.Box3().setFromObject(player);
+            
+            enemies.forEach(enemy => {
+                const enemyBox = new THREE.Box3().setFromObject(enemy.mesh);
+                
+                if (playerBox.intersectsBox(enemyBox)) {
+                    playerHealth--;
+                    // Knockback
+                    const knockback = new THREE.Vector3()
+                        .subVectors(player.position, enemy.mesh.position)
+                        .normalize()
+                        .multiplyScalar(2);
+                    player.position.add(knockback);
+                    
+                    if (playerHealth <= 0) {
+                        gameOver('Defeated by enemy!');
+                    } else {
+                        updateUI();
+                    }
+                }
+            });
+        }
+        
+        function checkExitCollision() {
+            if (!exit) return;
+            
+            const playerBox = new THREE.Box3().setFromObject(player);
+            const exitBox = new THREE.Box3().setFromObject(exit);
+            
+            if (playerBox.intersectsBox(exitBox)) {
+                victory();
+            }
+        }
+        
+        function updateEnemies() {
+            enemies.forEach(enemy => {
+                // Move enemy
+                const movement = enemy.direction.clone().multiplyScalar(enemy.speed);
+                enemy.mesh.position.add(movement);
+                
+                // Bounce animation
+                enemy.bounceTimer += 0.1;
+                enemy.mesh.position.y = enemy.mesh.position.y + Math.sin(enemy.bounceTimer) * 0.05;
+                
+                // Change direction randomly
+                if (Math.random() < 0.02) {
+                    enemy.direction = new THREE.Vector3(
+                        Math.random() - 0.5, 
+                        0, 
+                        Math.random() - 0.5
+                    ).normalize();
+                }
+                
+                // Keep enemies on platforms (simple boundary)
+                const worldBound = WORLD_SIZE/2;
+                if (Math.abs(enemy.mesh.position.x) > worldBound || 
+                    Math.abs(enemy.mesh.position.z) > worldBound) {
+                    enemy.direction.multiplyScalar(-1);
+                }
+            });
+        }
+        
+        function updateCamera() {
+            const targetX = player.position.x;
+            const targetZ = player.position.z + CAMERA_DISTANCE;
+            const targetY = player.position.y + CAMERA_HEIGHT;
+            
+            camera.position.lerp(new THREE.Vector3(targetX, targetY, targetZ), 0.1);
+            camera.lookAt(player.position.x, player.position.y + 1, player.position.z);
+        }
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            updatePlayer();
+            updateEnemies();
+            updateCamera();
+            
+            // Rotate exit
+            if (exit) {
+                exit.rotation.y += 0.02;
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        function gameOver(message) {
+            gameState = 'gameOver';
+            document.getElementById('gameOverTitle').textContent = 'Game Over!';
+            document.getElementById('gameOverText').textContent = message;
+            document.getElementById('gameOver').style.display = 'block';
+            document.getElementById('nextBtn').style.display = 'none';
+        }
+        
+        function victory() {
+            gameState = 'victory';
+            currentLevel++;
+            document.getElementById('gameOverTitle').textContent = 'Level Complete!';
+            document.getElementById('gameOverText').textContent = `Well done! Ready for level ${currentLevel}?`;
+            document.getElementById('gameOver').style.display = 'block';
+            document.getElementById('nextBtn').style.display = 'inline-block';
+        }
+        
+        function restartGame() {
+            gameState = 'playing';
+            currentLevel = 1;
+            playerHealth = 3;
+            player.position.set(-WORLD_SIZE/2 * VOXEL_SIZE, 5, -WORLD_SIZE/2 * VOXEL_SIZE);
+            playerVelocity.set(0, 0, 0);
+            world = new VoxelWorld();
+            document.getElementById('gameOver').style.display = 'none';
+            updateUI();
+        }
+        
+        function nextLevel() {
+            gameState = 'playing';
+            playerHealth = Math.min(3, playerHealth + 1); // Bonus health
+            player.position.set(-WORLD_SIZE/2 * VOXEL_SIZE, 5, -WORLD_SIZE/2 * VOXEL_SIZE);
+            playerVelocity.set(0, 0, 0);
+            world = new VoxelWorld();
+            document.getElementById('gameOver').style.display = 'none';
+            updateUI();
+        }
+        
+        function updateUI() {
+            document.getElementById('level').textContent = currentLevel;
+            document.getElementById('health').textContent = '❤️'.repeat(playerHealth);
+        }
+        
+        // Event listeners
+        document.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+        });
+        
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Start the game
+        initGame();
+        updateUI();
+    </script>
+</body>
+</html>
